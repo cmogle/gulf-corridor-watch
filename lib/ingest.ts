@@ -513,64 +513,27 @@ export async function runIngestion(opts?: { scope?: IngestScope }) {
     return withValidation(snapshot, contentHash, validation);
   }
 
-  for (const source of sources) {
-    try {
-      const snap = source.parser === "rss" ? await fetchRss(source) : await fetchHtml(source);
-      const validated = await validateSnapshot(snap);
-      snapshots.push(validated);
-      latestSnapshotValidation.set(source.id, {
-        source_id: source.id,
-        content_hash: validated.content_hash,
-        validation_state: validated.validation_state,
-        validation_score: validated.validation_score,
-        validation_reason: validated.validation_reason,
-        validation_model: validated.validation_model,
-        validated_at: validated.validated_at,
-        fetched_at: validated.fetched_at,
-      });
-    } catch (error) {
-      const errorText = String(error);
-      const blocked = /403|401|429|denied|rejected|forbidden|captcha/i.test(errorText);
-      const failureSnapshot: Snapshot = {
-        source_id: source.id,
-        source_name: source.name,
-        source_url: source.url,
-        category: source.category,
-        fetched_at: new Date().toISOString(),
-        published_at: null,
-        title: `${source.name} fetch error`,
-        summary: blocked
-          ? "Source currently blocked or challenge-protected. Open Official source for live details."
-          : "Source fetch failed during ingestion. Open Official source for live details.",
-        raw_text: "",
-        status_level: "unknown",
-        ingest_method: source.parser === "rss" ? "rss" : "official_web",
-        reliability: blocked ? "blocked" : "degraded",
-        block_reason: blocked ? errorText.slice(0, 200) : null,
-        priority: source.priority,
-        freshness_target_minutes: source.freshness_target_minutes,
-        evidence_basis: source.parser === "rss" ? "rss" : "official_web",
-        confirmation_state: "confirmed",
-        content_hash: null,
-        validation_state: "unvalidated",
-        validation_score: null,
-        validation_reason: null,
-        validation_model: null,
-        validated_at: null,
-      };
-      const validated = await validateSnapshot(failureSnapshot);
-      snapshots.push(validated);
-      latestSnapshotValidation.set(source.id, {
-        source_id: source.id,
-        content_hash: validated.content_hash,
-        validation_state: validated.validation_state,
-        validation_score: validated.validation_score,
-        validation_reason: validated.validation_reason,
-        validation_model: validated.validation_model,
-        validated_at: validated.validated_at,
-        fetched_at: validated.fetched_at,
-      });
-    }
+  // Phase 1: Fetch all sources in parallel
+  const fetchResults = await Promise.allSettled(
+    sources.map((source) => fetchSource(source))
+  );
+
+  // Phase 2: Validate sequentially (respects validation budget)
+  for (const result of fetchResults) {
+    if (result.status === "rejected") continue; // fetchSource never rejects; defensive skip
+    const snapshot = result.value;
+    const validated = await validateSnapshot(snapshot);
+    snapshots.push(validated);
+    latestSnapshotValidation.set(snapshot.source_id, {
+      source_id: snapshot.source_id,
+      content_hash: validated.content_hash,
+      validation_state: validated.validation_state,
+      validation_score: validated.validation_score,
+      validation_reason: validated.validation_reason,
+      validation_model: validated.validation_model,
+      validated_at: validated.validated_at,
+      fetched_at: validated.fetched_at,
+    });
   }
 
   const { error } = await supabase.from("source_snapshots").insert(snapshots);

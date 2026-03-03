@@ -86,7 +86,7 @@ create table if not exists flight_query_logs (
 
 create table if not exists social_signals (
   id uuid primary key default gen_random_uuid(),
-  provider text not null check (provider in ('x')),
+  provider text not null check (provider in ('x', 'telegram', 'rss_item')),
   handle text not null,
   post_id text not null,
   posted_at timestamptz not null,

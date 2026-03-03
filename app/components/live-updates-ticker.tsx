@@ -132,7 +132,7 @@ export function LiveUpdatesTicker({ initialItems }: LiveUpdatesTickerProps) {
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-2">
           {items.length === 0 ? (
             <p className="rounded-lg border border-dashed border-zinc-300 p-3 text-sm text-zinc-600">No updates available yet.</p>

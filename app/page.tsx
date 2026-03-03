@@ -319,7 +319,7 @@ export default async function Home({ searchParams }: HomeProps) {
               <p className="text-[11px] text-zinc-500">{socialSignals.length} active source feeds</p>
             </div>
             {socialSignals.length > 0 ? (
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2">
                 {socialSignals.map((signal) => (
                   <article key={`${signal.source_id}:${signal.post_id ?? "none"}`} className="rounded-lg border border-zinc-300 bg-white p-3 space-y-2">
                     <div className="flex items-start justify-between gap-2">
@@ -376,34 +376,34 @@ export default async function Home({ searchParams }: HomeProps) {
             )}
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-3 gap-2">
             <article className="rounded-xl border border-zinc-300 bg-white/80 p-3">
-              <p className="text-xs uppercase tracking-wide text-zinc-600">Flights Tracked (45m)</p>
-              <p className="text-2xl font-semibold">{pulse.total}</p>
+              <p className="text-[10px] uppercase tracking-wide text-zinc-600">Tracked</p>
+              <p className="text-xl font-semibold">{pulse.total}</p>
             </article>
             <article className="rounded-xl border border-zinc-300 bg-white/80 p-3">
-              <p className="text-xs uppercase tracking-wide text-zinc-600">Delayed</p>
-              <p className="text-2xl font-semibold text-amber-700">{pulse.delayed}</p>
+              <p className="text-[10px] uppercase tracking-wide text-zinc-600">Delayed</p>
+              <p className="text-xl font-semibold text-amber-700">{pulse.delayed}</p>
             </article>
             <article className="rounded-xl border border-zinc-300 bg-white/80 p-3">
-              <p className="text-xs uppercase tracking-wide text-zinc-600">Cancelled</p>
-              <p className="text-2xl font-semibold text-red-700">{pulse.cancelled}</p>
+              <p className="text-[10px] uppercase tracking-wide text-zinc-600">Cancelled</p>
+              <p className="text-xl font-semibold text-red-700">{pulse.cancelled}</p>
             </article>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-3 gap-2">
             <article className="rounded-xl border border-zinc-300 bg-white/80 p-3">
-              <p className="text-xs uppercase tracking-wide text-zinc-600">Official Sources</p>
-              <p className="text-2xl font-semibold">{usableRows.length}</p>
-              <p className="text-[11px] text-zinc-500">{suppressedRows.length} hidden as unusable</p>
+              <p className="text-[10px] uppercase tracking-wide text-zinc-600">Sources</p>
+              <p className="text-xl font-semibold">{usableRows.length}</p>
+              <p className="text-[10px] text-zinc-500">{suppressedRows.length} hidden</p>
             </article>
             <article className="rounded-xl border border-zinc-300 bg-white/80 p-3">
-              <p className="text-xs uppercase tracking-wide text-zinc-600">Advisory/Disrupted</p>
-              <p className="text-2xl font-semibold text-amber-700">{advisories}</p>
+              <p className="text-[10px] uppercase tracking-wide text-zinc-600">Advisory</p>
+              <p className="text-xl font-semibold text-amber-700">{advisories}</p>
             </article>
             <article className="rounded-xl border border-zinc-300 bg-white/80 p-3">
-              <p className="text-xs uppercase tracking-wide text-zinc-600">Unknown Status</p>
-              <p className="text-2xl font-semibold text-zinc-700">{unknown}</p>
+              <p className="text-[10px] uppercase tracking-wide text-zinc-600">Unknown</p>
+              <p className="text-xl font-semibold text-zinc-700">{unknown}</p>
             </article>
           </div>
 

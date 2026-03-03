@@ -182,7 +182,7 @@ export function FlightSearchWidget({ suggestedPrompts = [], latestFetch = null }
       )}
 
       {data?.ok && data.summary && (
-        <div className="grid gap-2 sm:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           <div className="rounded-lg border border-zinc-300 bg-white p-2 text-xs">Flights: {data.summary.total}</div>
           <div className="rounded-lg border border-zinc-300 bg-white p-2 text-xs text-amber-700">Delayed: {data.summary.delayed}</div>
           <div className="rounded-lg border border-zinc-300 bg-white p-2 text-xs text-red-700">Cancelled: {data.summary.cancelled}</div>

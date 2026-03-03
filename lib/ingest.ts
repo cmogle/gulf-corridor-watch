@@ -41,7 +41,16 @@ type Snapshot = {
 
 const parser = new XMLParser({ ignoreAttributes: false });
 const BLOCK_PATTERNS = [/access denied/i, /request rejected/i, /forbidden/i, /captcha/i, /attention required/i, /sorry for the inconvenience/i];
-const CRITICAL_SOURCE_IDS = new Set(["emirates_updates", "etihad_advisory", "oman_air", "rta_dubai", "uae_mofa"]);
+const CRITICAL_SOURCE_IDS = new Set([
+  "emirates_updates",
+  "etihad_advisory",
+  "oman_air",
+  "rta_dubai",
+  "uae_mofa",
+  "white_house_statements",
+  "us_dod_releases",
+  "us_centcom_news",
+]);
 const AIRPORTS = ["DXB", "AUH"] as const;
 
 type IngestScope = "full" | "airline";

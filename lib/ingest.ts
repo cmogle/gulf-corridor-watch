@@ -5,7 +5,7 @@ import { ingestAirports } from "./flightradar";
 import { ingestAirportsOpenSky } from "./opensky";
 import { fetchViaChromeRelay } from "./chrome-relay";
 import { pollOfficialXSignals } from "./x-signals";
-import { extractHtmlSnapshot, stripJinaPrefix } from "./source-extractors";
+import { extractHtmlSnapshot, stripJinaPrefix, stripMarkdown } from "./source-extractors";
 import {
   computeUpdateContentHash,
   getValidationMaxPerIngest,
@@ -187,7 +187,7 @@ async function fetchTextWithFallback(urls: string[], mode: "rss" | "html"): Prom
     try {
       const res = await fetch(candidate, { cache: "no-store", headers: BROWSERISH_HEADERS });
       const rawText = await res.text();
-      const text = fromMirror ? stripJinaPrefix(rawText) : rawText;
+      const text = fromMirror ? stripMarkdown(stripJinaPrefix(rawText)) : rawText;
       const reliable = inferReliability(text, res.status);
       const looksLikeRss = /<rss[\s>]|<feed[\s>]/i.test(text);
       if (mode === "rss" && !looksLikeRss) {

@@ -25,14 +25,23 @@ function decodeEntities(input: string): string {
 
 /**
  * Strip the structured prefix that Jina reader (r.jina.ai) prepends to markdown output.
- * Only strips when these lines appear at the very start of the text.
+ * Handles variations: some responses include Title/URL Source/Markdown Content,
+ * others omit Title and start with URL Source directly, and some include
+ * Published Time or Warning lines.
+ * Only called for text known to come from Jina (fromMirror === true).
  */
 export function stripJinaPrefix(text: string): string {
-  if (!text.startsWith("Title: ")) return text;
-  const stripped = text
-    .replace(/^Title:\s*[^\n]*\n?/, "")
-    .replace(/^URL Source:\s*[^\n]*\n?/, "")
-    .replace(/^Markdown Content:\s*\n?/, "");
+  const JINA_HEADER = /^(Title|URL Source|Published Time|Markdown Content):\s*/;
+  if (!JINA_HEADER.test(text)) return text;
+  let stripped = text;
+  // Use \n* (not \n?) to consume blank lines between Jina header fields
+  stripped = stripped.replace(/^Title:\s*[^\n]*\n*/, "");
+  stripped = stripped.replace(/^URL Source:\s*[^\n]*\n*/, "");
+  stripped = stripped.replace(/^Published Time:\s*[^\n]*\n*/, "");
+  while (/^Warning:\s*/.test(stripped)) {
+    stripped = stripped.replace(/^Warning:\s*[^\n]*\n*/, "");
+  }
+  stripped = stripped.replace(/^Markdown Content:\s*\n*/, "");
   return stripped;
 }
 

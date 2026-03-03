@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { stripJinaPrefix } from "./source-extractors.ts";
 
+// Jina responses have blank lines between header fields
 const JINA_RESPONSE = `Title: Oman Air
+
 URL Source: http://www.omanair.com/om/en/travel-updates
+
 Markdown Content:
 Oman Air ===============
 
@@ -42,4 +45,29 @@ test("stripJinaPrefix does not strip Title: in middle of content", () => {
   const content = "Some heading\n\nTitle: this is a heading in the body\n\nMore content";
   const result = stripJinaPrefix(content);
   assert.equal(result, content);
+});
+
+test("stripJinaPrefix handles response starting with URL Source (no Title line)", () => {
+  const noTitle = `URL Source: http://www.emirates.com/ae/english/help/travel-updates/
+Markdown Content:
+Travel updates | Help | Emirates ===============`;
+  const result = stripJinaPrefix(noTitle);
+  assert.ok(!result.includes("URL Source:"));
+  assert.ok(!result.includes("Markdown Content:"));
+  assert.ok(result.includes("Travel updates | Help | Emirates"));
+});
+
+test("stripJinaPrefix strips Published Time and Warning lines", () => {
+  const withWarnings = `URL Source: http://www.etihad.com/en/help/travel-updates
+Published Time: Tue, 03 Mar 2026 15:12:40 GMT
+Warning: Target URL returned error 404: Not Found
+Warning: This page maybe not yet fully loaded
+Markdown Content:
+Page Not Found ===============`;
+  const result = stripJinaPrefix(withWarnings);
+  assert.ok(!result.includes("URL Source:"));
+  assert.ok(!result.includes("Published Time:"));
+  assert.ok(!result.includes("Warning:"));
+  assert.ok(!result.includes("Markdown Content:"));
+  assert.ok(result.includes("Page Not Found"));
 });

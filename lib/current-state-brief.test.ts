@@ -112,6 +112,12 @@ test("fallback paragraph calls out limited telemetry when no flights are availab
   assert.match(paragraph, /limited current flight telemetry/i);
 });
 
+test("fallback paragraph avoids technical phrasing around language mentions", () => {
+  const paragraph = buildFallbackBriefParagraph(makeContext());
+  assert.doesNotMatch(paragraph, /advisory\/disrupted language/i);
+  assert.doesNotMatch(paragraph, /disruption-related language/i);
+});
+
 test("json extraction handles markdown code fences", () => {
   const payload = "```json\n{\"paragraph\":\"Status stable.\"}\n```";
   assert.equal(extractBriefJsonObject(payload), "{\"paragraph\":\"Status stable.\"}");

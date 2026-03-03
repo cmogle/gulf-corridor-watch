@@ -240,18 +240,6 @@ function suppressionReason(row: Row) {
   return "low-signal source content";
 }
 
-function freshnessBadgeClass(state: "fresh" | "mixed" | "stale"): string {
-  if (state === "fresh") return "bg-emerald-100 text-emerald-800";
-  if (state === "mixed") return "bg-amber-100 text-amber-800";
-  return "bg-red-100 text-red-800";
-}
-
-function confidenceBadgeClass(state: "high" | "medium" | "low"): string {
-  if (state === "high") return "bg-sky-100 text-sky-800";
-  if (state === "medium") return "bg-zinc-200 text-zinc-800";
-  return "bg-amber-100 text-amber-900";
-}
-
 export default async function Home({ searchParams }: HomeProps) {
   const params = (await searchParams) ?? {};
   const initialQuery = params.q?.trim() ?? "";
@@ -274,14 +262,7 @@ export default async function Home({ searchParams }: HomeProps) {
             <section className="rounded-2xl border border-zinc-300 bg-white/90 p-4 md:p-6 shadow-[0_10px_40px_rgba(10,28,42,0.08)]">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Current State Briefing</p>
-                <div className="flex items-center gap-2">
-                  <span className={`rounded-full px-2 py-1 text-[10px] uppercase ${freshnessBadgeClass(currentBrief.freshness_state)}`}>
-                    {currentBrief.freshness_state}
-                  </span>
-                  <span className={`rounded-full px-2 py-1 text-[10px] uppercase ${confidenceBadgeClass(currentBrief.confidence)}`}>
-                    {currentBrief.confidence} confidence
-                  </span>
-                </div>
+                <p className="text-[11px] text-zinc-500">Auto-refreshed from ingest updates</p>
               </div>
               <p className="mt-3 text-sm leading-relaxed text-zinc-800">{currentBrief.paragraph}</p>
               <p className="mt-2 text-[11px] text-zinc-600">

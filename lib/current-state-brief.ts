@@ -251,16 +251,16 @@ export function buildFallbackBriefParagraph(context: BriefInputContext): string 
     xCount === 0
       ? "No recent official X posts are currently available."
       : xWithKeywords > 0
-        ? `Latest official X activity includes disruption-related language in ${xWithKeywords} monitored feeds.`
-        : "Latest official X posts align with website narratives and do not indicate a new system-wide disruption.";
+        ? `Latest official X activity flags relevant advisory updates in ${xWithKeywords} monitored feeds.`
+        : "Latest official X posts align with website updates and do not indicate a broader new disruption.";
   const stalePhrase =
     staleCount === 0
-      ? "All monitored sources are within freshness targets."
+      ? "All monitored sources are updating within expected windows."
       : staleCount > sourceCount / 2
-        ? `${staleCount} of ${sourceCount} monitored sources are stale, so confidence is reduced pending fresh updates.`
-        : `${staleCount} monitored sources are currently stale and should be verified directly.`;
+        ? `${staleCount} of ${sourceCount} monitored sources have older updates and should be rechecked on the next ingest cycle.`
+        : `${staleCount} monitored sources currently have older updates and may lag until the next ingest cycle.`;
 
-  return `As of ${formatDubaiTime(context.computed_at)}, regional air traffic around DXB/AUH appears ${trafficLevel(context.flight.total)}, with ${flightPhrase}. Across ${sourceCount} monitored official sources, ${advisorySources} currently show advisory/disrupted language${unknownSources > 0 ? ` and ${unknownSources} remain in unknown status` : ""}. ${xPhrase} ${stalePhrase}`;
+  return `As of ${formatDubaiTime(context.computed_at)}, regional air traffic around DXB/AUH appears ${trafficLevel(context.flight.total)}, with ${flightPhrase}. Across ${sourceCount} monitored official sources, ${advisorySources} currently show active advisories or disruptions${unknownSources > 0 ? ` and ${unknownSources} have unclear status` : ""}. ${xPhrase} ${stalePhrase}`;
 }
 
 function normalizeFlightSummary(value: unknown): CurrentStateBrief["flight"] {
@@ -437,7 +437,7 @@ async function generateBriefParagraphWithModel(
           {
             role: "system",
             content:
-              "You synthesize transport and official advisory context. Output strict JSON only: {\"paragraph\": string}. Requirements: one concise English paragraph (70-110 words), include air-traffic state, official-source narrative, and official X alignment. No speculation, no policy advice, no bullet points. Mention uncertainty/staleness if data is stale.",
+              "You synthesize transport and official advisory context. Output strict JSON only: {\"paragraph\": string}. Requirements: one concise English paragraph (70-110 words), include air-traffic state, official-source narrative, and official X alignment. No speculation, no policy advice, no bullet points. Use plain language and avoid meta phrasing like 'language mentions'. If coverage is older, state that in user-friendly terms.",
           },
           {
             role: "user",

@@ -388,6 +388,9 @@ export async function runIngestion(opts?: { scope?: IngestScope }) {
   let signalError: string | null = null;
   let signalSkipped = false;
   let signalSkipReason: string | null = null;
+  let briefRegenerated: boolean | null = null;
+  let briefReason: string | null = null;
+  let briefError: string | null = null;
 
   async function validateSnapshot(snapshot: Snapshot): Promise<Snapshot> {
     const contentHash = computeUpdateContentHash({
@@ -612,6 +615,15 @@ export async function runIngestion(opts?: { scope?: IngestScope }) {
     }
   }
 
+  try {
+    const { refreshCurrentStateBrief } = await import("./current-state-brief");
+    const refresh = await refreshCurrentStateBrief();
+    briefRegenerated = refresh.regenerated;
+    briefReason = refresh.reason;
+  } catch (error) {
+    briefError = String(error);
+  }
+
   return {
     scope,
     count: snapshots.length,
@@ -622,6 +634,9 @@ export async function runIngestion(opts?: { scope?: IngestScope }) {
     signal_error: signalError,
     signal_skipped: signalSkipped,
     signal_skip_reason: signalSkipReason,
+    brief_regenerated: briefRegenerated,
+    brief_reason: briefReason,
+    brief_error: briefError,
     x_min_poll_minutes: getXPollIntervalMinutes(),
     validation_runs: validationRuns,
     validation_budget: validationBudget,

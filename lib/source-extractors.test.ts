@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { stripJinaPrefix, stripMarkdown } from "./source-extractors.ts";
+import { stripJinaPrefix, stripMarkdown, extractHtmlSnapshot } from "./source-extractors.ts";
 
 // Jina responses have blank lines between header fields
 const JINA_RESPONSE = `Title: Oman Air
@@ -114,4 +114,40 @@ test("stripMarkdown handles mixed markdown content", () => {
   assert.ok(!result.includes("]("));
   assert.ok(result.includes("our site"));
   assert.ok(result.includes("Item one"));
+});
+
+test("extractHtmlSnapshot marks unusable when summary equals source name", () => {
+  const source = {
+    id: "test_source",
+    name: "Bureau of Immigration - BOI",
+    url: "https://example.com",
+    category: "government",
+    parser: "html" as const,
+    connector: "direct_html" as const,
+    extractor_id: "html_title_text",
+    priority: 60,
+    freshness_target_minutes: 30,
+    region: "india" as const,
+  };
+  const html = "<html><head><title>Bureau of Immigration - BOI</title></head><body><p>Bureau of Immigration - BOI</p></body></html>";
+  const result = extractHtmlSnapshot(source, html);
+  assert.equal(result.unusable, true);
+});
+
+test("extractHtmlSnapshot does not mark unusable when summary has real content", () => {
+  const source = {
+    id: "test_source",
+    name: "Emirates Travel Updates",
+    url: "https://example.com",
+    category: "airline",
+    parser: "html" as const,
+    connector: "direct_html" as const,
+    extractor_id: "html_title_text",
+    priority: 90,
+    freshness_target_minutes: 5,
+    region: "uae" as const,
+  };
+  const html = '<html><head><title>Emirates Travel Updates</title><meta name="description" content="Check the latest travel advisories and flight schedule changes for Emirates airline."></head><body></body></html>';
+  const result = extractHtmlSnapshot(source, html);
+  assert.equal(result.unusable, false);
 });

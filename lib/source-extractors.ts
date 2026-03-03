@@ -368,7 +368,8 @@ export function extractHtmlSnapshot(source: SourceDef, html: string): HtmlExtrac
   const title = sanitizeSourceText(extracted.title || source.name);
   const summary = sanitizeSourceText(extracted.summary);
   const rawText = sanitizeSourceText(extracted.rawText).slice(0, 10000);
-  const unusable = isUnusableSourceText(`${title} ${summary}`);
+  const nameOnly = summary.trim().toLowerCase() === source.name.trim().toLowerCase();
+  const unusable = nameOnly || isUnusableSourceText(`${title} ${summary}`);
   return {
     title: title || source.name,
     summary: summary || rawText.slice(0, 1000),

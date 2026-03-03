@@ -1,5 +1,5 @@
 import { getSupabaseAdmin } from "./supabase";
-import type { ExpertSignal, ExpertDigest, ExpertFeedResponse } from "./expert-feed";
+import type { ExpertSignal, ExpertFeedResponse } from "./expert-feed";
 
 export async function loadKnownPostIds(handles: string[]): Promise<Set<string>> {
   const supabase = getSupabaseAdmin();

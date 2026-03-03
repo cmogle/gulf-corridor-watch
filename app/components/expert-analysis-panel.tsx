@@ -35,11 +35,15 @@ export function ExpertAnalysisPanel() {
   }, []);
 
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+    fetch("/api/expert-feed", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((json: ExpertFeedResponse) => { if (!cancelled && json.ok) setFeed(json); })
+      .catch(() => {});
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
     }, 5 * 60_000);
-    return () => window.clearInterval(interval);
+    return () => { cancelled = true; window.clearInterval(interval); };
   }, [refresh]);
 
   if (!feed) return null;

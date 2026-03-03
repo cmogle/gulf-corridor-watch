@@ -7,8 +7,34 @@ const BRIEF_KEY = "global";
 const DEFAULT_MODEL = "gpt-4o-mini";
 const DEFAULT_TIMEOUT_MS = 8000;
 const EXPECTED_MISSING_SOURCES = ["india_consulate_dubai", "india_embassy_abu_dhabi", "broader_mena_ministries"];
-export const NARRATIVE_POLICY_VERSION = "v3_strict_extractive_no_source_counts";
+export const NARRATIVE_POLICY_VERSION = "v4_uae_airspace_sitrep_extractive";
 const DEFAULT_BRIEF_GENERATION_MODE = "extractive";
+const AIRSPACE_RELEVANCE_KEYWORDS = [
+  "airspace",
+  "air traffic",
+  "airport",
+  "aviation",
+  "flight",
+  "delay",
+  "cancel",
+  "reroute",
+  "diversion",
+  "suspend",
+  "closure",
+  "closed",
+  "runway",
+  "terminal",
+  "operation",
+  "missile",
+  "drone",
+  "uav",
+  "fighter",
+  "military",
+  "air defense",
+  "intercept",
+  "sirens",
+  "security alert",
+];
 
 export type BriefFreshnessState = "fresh" | "mixed" | "stale";
 export type BriefConfidence = "high" | "medium" | "low";
@@ -220,14 +246,6 @@ function formatDubaiTime(iso: string): string {
   return `${stamp} GST`;
 }
 
-function trafficLevel(totalFlights: number): string {
-  if (totalFlights === 0) return "unclear";
-  if (totalFlights <= 20) return "very light";
-  if (totalFlights <= 80) return "light";
-  if (totalFlights <= 180) return "moderate";
-  return "elevated";
-}
-
 function stableArray<T>(rows: T[], keyFn: (row: T) => string): T[] {
   return [...rows].sort((a, b) => keyFn(a).localeCompare(keyFn(b)));
 }
@@ -295,6 +313,15 @@ function normalizeForDedup(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+function relevanceScore(text: string): number {
+  const normalized = text.toLowerCase();
+  let score = 0;
+  for (const keyword of AIRSPACE_RELEVANCE_KEYWORDS) {
+    if (normalized.includes(keyword)) score += 1;
+  }
+  return score;
+}
+
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -314,6 +341,7 @@ function cleanEvidenceText(text: string): string {
     .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
     .replace(/\[[^\]]+]\(https?:\/\/[^)]+\)/g, " ")
     .replace(/https?:\/\/\S+/g, " ")
+    .replace(/\+\d+\s+more\b[^.]*\.?/gi, " ")
     .replace(/\b(?:url source|markdown content)\b[\s\S]*$/i, " ")
     .replace(/\btitle:\s*/gi, "")
     .replace(/[_=*#`>]+/g, " ")
@@ -335,7 +363,13 @@ function pickBestEvidenceSegment(text: string): string {
     .split(/\s+\|\s+|(?<=[.!?])\s+/)
     .map((segment) => segment.trim())
     .filter((segment) => segment.length >= 24);
-  return segments[0] ?? text;
+  if (segments.length === 0) return text;
+  const ranked = [...segments].sort((a, b) => {
+    const scoreDiff = relevanceScore(b) - relevanceScore(a);
+    if (scoreDiff !== 0) return scoreDiff;
+    return b.length - a.length;
+  });
+  return ranked[0];
 }
 
 function isLowValueEvidence(text: string): boolean {
@@ -373,6 +407,7 @@ function selectNarrativeEvidenceRows(context: BriefInputContext, maxRows = 2): N
   for (const row of rows) {
     const evidenceText = buildEvidenceClause(row);
     if (isLowValueEvidence(evidenceText)) continue;
+    if (relevanceScore(evidenceText) === 0) continue;
     const key = normalizeForDedup(evidenceText);
     if (!key || seen.has(key)) continue;
     seen.add(key);
@@ -398,6 +433,7 @@ function selectCorroboratedSocialRows(context: BriefInputContext, maxRows = 2): 
       if (!(source.status_level === "advisory" || source.status_level === "disrupted")) return null;
       const cleanText = compact(cleanEvidenceText(row.text_display), 120);
       if (isLowValueEvidence(cleanText)) return null;
+      if (relevanceScore(cleanText) === 0) return null;
       return {
         source_id: row.source_id,
         source_name: source.source_name,
@@ -425,19 +461,61 @@ function buildNarrativeBasis(context: BriefInputContext): NarrativeBasis {
   };
 }
 
-function buildSourceNarrativeSentence(rows: NarrativeEvidenceRow[]): string {
-  if (rows.length === 0) {
-    return "Official source pages currently provide limited clear narrative detail.";
-  }
-  const clauses = rows.map((row) => `${row.source_name} reports ${row.clause}`);
-  return `Key official updates: ${clauses.join("; ")}.`;
+function hasSecuritySignal(rows: NarrativeEvidenceRow[], socialRows: CorroboratedSocialRow[]): boolean {
+  const combined = [...rows.map((row) => row.clause), ...socialRows.map((row) => row.text)].join(" ").toLowerCase();
+  return /\b(missile|drone|uav|fighter|military|air defense|intercept|sirens)\b/i.test(combined);
 }
 
-function buildSocialNarrativeSentence(rows: CorroboratedSocialRow[]): string {
-  if (rows.length === 0) return "";
-  const handles = Array.from(new Set(rows.map((row) => `@${row.handle}`)));
-  const socialTheme = rows.map((row) => row.text).join("; ");
-  return `Recent official X posts from ${handles.join(", ")} corroborate the same advisory themes: ${socialTheme}.`;
+function deriveAirspacePosture(context: BriefInputContext, basis: NarrativeBasis): "normal" | "heightened" | "unclear" {
+  const securitySignals = hasSecuritySignal(basis.source_evidence_rows, basis.corroborated_social_rows);
+  const operationalDisruption = context.flight.delayed > 0 || context.flight.cancelled > 0;
+  if (context.flight.stale || basis.freshness_caveat_required) return "unclear";
+  if (securitySignals || operationalDisruption) return "heightened";
+  return "normal";
+}
+
+function buildPostureSentence(context: BriefInputContext, posture: "normal" | "heightened" | "unclear"): string {
+  const postureText =
+    posture === "normal"
+      ? "normal"
+      : posture === "heightened"
+        ? "heightened"
+        : "unclear";
+  const flightSentence =
+    context.flight.total > 0
+      ? `Commercial traffic sample shows ${context.flight.total} tracked flights in the last 45 minutes (${context.flight.delayed} delayed, ${context.flight.cancelled} cancelled).`
+      : "Commercial traffic visibility is currently limited.";
+  return `As of ${formatDubaiTime(context.computed_at)}, UAE airspace posture appears ${postureText}. ${flightSentence}`;
+}
+
+function buildConfirmedSentence(rows: NarrativeEvidenceRow[], socialRows: CorroboratedSocialRow[]): string {
+  if (rows.length === 0 && socialRows.length === 0) {
+    return "Confirmed official signals: no clear official notices of missile, drone, or military-aircraft incidents were found in current ingested sources.";
+  }
+  const sourcePart = rows.map((row) => `${row.source_name}: ${row.clause}`).join("; ");
+  const socialPart =
+    socialRows.length > 0
+      ? ` Corroborated official X signals: ${socialRows.map((row) => `@${row.handle}: ${row.text}`).join("; ")}.`
+      : "";
+  return `Confirmed official signals: ${sourcePart}.${socialPart}`;
+}
+
+function buildUnknownsSentence(context: BriefInputContext): string {
+  const parts: string[] = [];
+  if (context.coverage.stale_sources.length > 0) parts.push("some source feeds are not fresh");
+  if (context.flight.stale) parts.push("commercial flight telemetry is stale");
+  if (parts.length === 0) return "Unknowns: no major unresolved data gaps are currently flagged.";
+  return `Unknowns: ${parts.join(" and ")}.`;
+}
+
+function buildImplicationSentence(posture: "normal" | "heightened" | "unclear"): string {
+  if (posture === "heightened") {
+    return "Practical implication for UAE residents: expect possible short-notice routing or schedule changes and monitor official channels closely.";
+  }
+  if (posture === "normal") {
+    return "Practical implication for UAE residents: no broad disruption signal is currently confirmed; continue normal plans while monitoring official channels.";
+  }
+  return "Practical implication for UAE residents: conditions are uncertain right now, so rely on official UAE channels for immediate guidance.";
 }
 
 function buildFreshnessCaveat(shouldInclude: boolean): string {
@@ -461,15 +539,14 @@ export function isNarrativePolicyCompliant(paragraph: string, opts: { allowXMent
 
 export function buildFallbackBriefParagraph(context: BriefInputContext): string {
   const basis = buildNarrativeBasis(context);
-  const flightPhrase =
-    context.flight.total > 0
-      ? `${context.flight.total} tracked flights in the last 45 minutes (${context.flight.delayed} delayed, ${context.flight.cancelled} cancelled)`
-      : "limited current flight telemetry";
-  const sourceNarrative = buildSourceNarrativeSentence(basis.source_evidence_rows);
-  const socialNarrative = buildSocialNarrativeSentence(basis.corroborated_social_rows);
+  const posture = deriveAirspacePosture(context, basis);
+  const postureSentence = buildPostureSentence(context, posture);
+  const confirmedSentence = buildConfirmedSentence(basis.source_evidence_rows, basis.corroborated_social_rows);
+  const unknownsSentence = buildUnknownsSentence(context);
+  const implicationSentence = buildImplicationSentence(posture);
   const freshnessCaveat = buildFreshnessCaveat(basis.freshness_caveat_required);
   return compact(
-    `As of ${formatDubaiTime(context.computed_at)}, regional air traffic around DXB/AUH appears ${trafficLevel(context.flight.total)}, with ${flightPhrase}. ${sourceNarrative} ${socialNarrative} ${freshnessCaveat}`,
+    `${postureSentence} ${confirmedSentence} ${unknownsSentence} ${implicationSentence} ${freshnessCaveat}`,
     1200,
   );
 }
@@ -759,7 +836,7 @@ async function generateBriefParagraphWithModel(
           {
             role: "system",
             content:
-              "You synthesize transport and official advisory context. Output strict JSON only: {\"paragraph\": string}. Requirements: one concise English paragraph (70-110 words), include air-traffic state with operational flight counts, and summarize underlying official-source text snippets. Do not include source/feed quantification or source count language. Mention official X only when corroborated_social_rows are provided. No speculation, no policy advice, no bullet points. If freshness_caveat_required is true, include one short plain-language caveat.",
+              "You write a UAE resident airspace situation brief. Output strict JSON only: {\"paragraph\": string}. Requirements: one concise English paragraph (90-140 words) structured as posture, confirmed signals, unknowns, and practical implication. Use only provided snippets; no speculation and no invented facts. Keep operational flight counts if available. Mention official X only when corroborated_social_rows are provided. Do not include source/feed quantification.",
           },
           {
             role: "user",

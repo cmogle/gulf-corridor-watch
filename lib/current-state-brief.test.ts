@@ -139,7 +139,7 @@ test("fallback paragraph calls out limited telemetry when no flights are availab
       confidence: "low",
     }),
   );
-  assert.match(paragraph, /limited current flight telemetry/i);
+  assert.match(paragraph, /Commercial traffic visibility is currently limited/i);
 });
 
 test("fallback paragraph avoids technical phrasing around language mentions", () => {
@@ -150,7 +150,7 @@ test("fallback paragraph avoids technical phrasing around language mentions", ()
 
 test("fallback paragraph is evidence-first and omits source/feed counts", () => {
   const paragraph = buildFallbackBriefParagraph(makeContext());
-  assert.match(paragraph, /Key official updates:/i);
+  assert.match(paragraph, /Confirmed official signals:/i);
   assert.match(paragraph, /Minor delay notice/i);
   assert.doesNotMatch(paragraph, /monitored sources?|monitored feeds?/i);
   assert.doesNotMatch(paragraph, /\b\d+\s+of\s+\d+\s+sources?\b/i);
@@ -158,9 +158,17 @@ test("fallback paragraph is evidence-first and omits source/feed counts", () => 
 
 test("fallback paragraph keeps flight operational numbers", () => {
   const paragraph = buildFallbackBriefParagraph(makeContext());
-  assert.match(paragraph, /32 tracked flights in the last 45 minutes/i);
+  assert.match(paragraph, /Commercial traffic sample shows 32 tracked flights in the last 45 minutes/i);
   assert.match(paragraph, /2 delayed/i);
   assert.match(paragraph, /0 cancelled/i);
+});
+
+test("fallback paragraph follows sitrep structure", () => {
+  const paragraph = buildFallbackBriefParagraph(makeContext());
+  assert.match(paragraph, /UAE airspace posture appears/i);
+  assert.match(paragraph, /Confirmed official signals:/i);
+  assert.match(paragraph, /Unknowns:/i);
+  assert.match(paragraph, /Practical implication for UAE residents:/i);
 });
 
 test("fallback paragraph omits x narrative when not corroborated", () => {
@@ -250,7 +258,7 @@ test("hash changes when narrative policy version changes", () => {
 test("policy compliance rejects source/feed count phrasing and disallowed x mentions", () => {
   assert.equal(isNarrativePolicyCompliant("Across 11 monitored official sources, two are stale.", { allowXMention: true }), false);
   assert.equal(isNarrativePolicyCompliant("Recent official X posts from @etihad align with advisories.", { allowXMention: false }), false);
-  assert.equal(isNarrativePolicyCompliant("Regional air traffic is light and official updates indicate localized delays.", { allowXMention: false }), true);
+  assert.equal(isNarrativePolicyCompliant("UAE airspace posture appears unclear and confirmed official signals show localized delays.", { allowXMention: false }), true);
 });
 
 test("json extraction handles markdown code fences", () => {

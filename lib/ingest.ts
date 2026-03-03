@@ -5,7 +5,7 @@ import { ingestAirports } from "./flightradar";
 import { ingestAirportsOpenSky } from "./opensky";
 import { fetchViaChromeRelay } from "./chrome-relay";
 import { pollOfficialXSignals } from "./x-signals";
-import { extractHtmlSnapshot } from "./source-extractors";
+import { extractHtmlSnapshot, stripJinaPrefix } from "./source-extractors";
 import {
   computeUpdateContentHash,
   getValidationMaxPerIngest,
@@ -186,7 +186,8 @@ async function fetchTextWithFallback(urls: string[], mode: "rss" | "html"): Prom
     const fromMirror = candidate.startsWith("https://r.jina.ai/");
     try {
       const res = await fetch(candidate, { cache: "no-store", headers: BROWSERISH_HEADERS });
-      const text = await res.text();
+      const rawText = await res.text();
+      const text = fromMirror ? stripJinaPrefix(rawText) : rawText;
       const reliable = inferReliability(text, res.status);
       const looksLikeRss = /<rss[\s>]|<feed[\s>]/i.test(text);
       if (mode === "rss" && !looksLikeRss) {

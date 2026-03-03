@@ -288,15 +288,17 @@ async function fetchRss(source: SourceDef): Promise<Snapshot> {
     return Array.isArray(raw) ? raw : [raw];
   })();
 
-  const bestItems = pickBestRssItems(rawItems);
-  const primary = bestItems[0] ?? rawItems[0];
+  const scoredItems = pickBestRssItemsScored(rawItems);
+  const hasRelevantItems = scoredItems.length > 0 && scoredItems[0].score > 0;
+  let title: string;
+  let summary: string;
+  let rssReliability: Snapshot["reliability"] = inferReliability(xml, status);
 
-  // Build rich title: for US State Dept, list all elevated Gulf advisories
-  let title: string = String(primary?.title ?? source.name);
-  let summary: string = "";
-
-  if (source.id === "us_state_dept_travel" && rawItems.length > 0) {
-    // Find all Level 3/4 Gulf/ME advisories and create an aggregate view
+  if (!hasRelevantItems) {
+    title = source.name;
+    summary = "No current Gulf-relevant advisories";
+    rssReliability = "degraded";
+  } else if (source.id === "us_state_dept_travel") {
     const elevated = rawItems.filter((item) => {
       const t = (item.title ?? "").toLowerCase();
       return (t.includes("level 3") || t.includes("level 4") || t.includes("do not travel") || t.includes("reconsider")) &&
@@ -308,22 +310,26 @@ async function fetchRss(source: SourceDef): Promise<Snapshot> {
         return t.replace(/\s*-\s*Level\s*\d+.*$/i, "").trim();
       });
       title = `US Travel Advisories: ${countries.slice(0, 4).join(", ")}${countries.length > 4 ? ` +${countries.length - 4} more` : ""} elevated`;
-      summary = elevated.map((item) => {
-        const desc = (item.description ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
-        return `${item.title}: ${desc}`;
-      }).join(" | ");
+      const formatted = formatRssSummary(
+        elevated.map((item) => ({
+          title: item.title ?? "",
+          description: item.description ?? "",
+          score: 1,
+        })),
+      );
+      summary = formatted.summary;
     } else {
-      summary = bestItems.map((item) => `${item.title ?? ""}`).join(" | ");
+      const formatted = formatRssSummary(scoredItems);
+      title = formatted.title || source.name;
+      summary = formatted.summary;
     }
   } else {
-    summary = bestItems
-      .map((item) => `${item.title ?? ""}${item.description ? ": " + (item.description ?? "").toString().replace(/<[^>]+>/g, " ").trim().slice(0, 120) : ""}`)
-      .join(" | ")
-      .slice(0, 1000);
-    if (!summary) summary = (primary?.description ?? "").toString().slice(0, 1000);
+    const formatted = formatRssSummary(scoredItems);
+    title = formatted.title || String(scoredItems[0]?.title ?? source.name);
+    summary = formatted.summary;
   }
 
-  const published = primary?.pubDate ? new Date(primary.pubDate).toISOString() : null;
+  const published = rawItems[0]?.pubDate ? new Date(rawItems[0].pubDate).toISOString() : null;
   const combinedText = `${title} ${summary}`;
 
   return {
@@ -338,7 +344,7 @@ async function fetchRss(source: SourceDef): Promise<Snapshot> {
     raw_text: xml.slice(0, 10000),
     status_level: inferLevel(combinedText),
     ingest_method: "rss",
-    reliability: inferReliability(xml, status),
+    reliability: rssReliability,
     block_reason: null,
     priority: source.priority,
     freshness_target_minutes: source.freshness_target_minutes,

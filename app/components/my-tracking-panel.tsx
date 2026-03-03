@@ -24,7 +24,7 @@ function stateBadge(state: TrackingEvaluation["state"]) {
         : state === "disrupted"
           ? "bg-red-100 text-red-800"
           : "bg-zinc-200 text-zinc-700";
-  return <span className={`rounded-full px-2 py-1 text-[11px] font-medium ${cls}`}>{state.toUpperCase()}</span>;
+  return <span className={`rounded-full px-2 py-1 text-xs font-medium ${cls}`}>{state.toUpperCase()}</span>;
 }
 
 async function refreshOne(item: TrackingItem): Promise<TrackingEvaluation> {
@@ -138,7 +138,7 @@ export function MyTrackingPanel() {
   }
 
   return (
-    <section className="rounded-2xl border border-zinc-300 bg-white/85 p-4 md:p-6 shadow-[0_10px_40px_rgba(10,28,42,0.06)]">
+    <section className="rounded-xl border border-gray-200 bg-white p-4 md:p-6 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-base font-semibold tracking-tight">My Tracking</h3>
         <button onClick={() => void refreshStatuses()} className="rounded-md border border-zinc-400 px-2 py-1 text-xs hover:bg-zinc-100">

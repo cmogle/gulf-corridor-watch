@@ -1,10 +1,12 @@
-import { getSupabaseAdmin } from "@/lib/supabase";
+import { getSupabaseAdmin } from "./supabase.ts";
 import {
   normalizeUnifiedUpdateRow,
   sortUnifiedUpdates,
+} from "./unified-updates-types.ts";
+import type {
   UnifiedUpdateItem,
   UnifiedUpdateRow,
-} from "@/lib/unified-updates-types";
+} from "./unified-updates-types.ts";
 
 type LoadSourceHistoryOptions = {
   limit?: number;
@@ -17,6 +19,18 @@ const SELECT_COLUMNS =
 function clampLimit(limit?: number): number {
   if (!Number.isFinite(limit) || !limit) return 40;
   return Math.max(1, Math.min(200, Math.round(limit)));
+}
+
+export function deduplicateFeedItems(items: UnifiedUpdateItem[]): UnifiedUpdateItem[] {
+  const seen = new Set<string>();
+  const out: UnifiedUpdateItem[] = [];
+  for (const item of items) {
+    const key = `${item.source_id}:${item.summary.trim().toLowerCase().slice(0, 200)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
 }
 
 export async function loadUnifiedFeed(limit?: number): Promise<UnifiedUpdateItem[]> {

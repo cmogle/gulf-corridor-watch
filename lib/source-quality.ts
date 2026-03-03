@@ -24,6 +24,11 @@ const UNUSABLE_PATTERNS = [
   /sorry, we don't have any information about flights for this airport/i,
   /gold star logo search home services/i,
   /loading\.\.\./i,
+  /file not found/i,
+  /page not found/i,
+  /404 not found/i,
+  /page you requested was not found/i,
+  /this page (is|has been) (removed|unavailable)/i,
 ];
 
 const LOW_SIGNAL_PATTERNS = [/^\s*$/, /^(no|none|n\/a)$/i];

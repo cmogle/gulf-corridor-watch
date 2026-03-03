@@ -34,3 +34,15 @@ test("isUsableFeedItem rejects snapshot with empty summary", () => {
   assert.equal(isUsableFeedItem({ headline: "US Department of Defense Releases", summary: "", reliability: "reliable", update_type: "snapshot" }), false);
   assert.equal(isUsableFeedItem({ headline: "US Department of Defense Releases", summary: "   ", reliability: "reliable", update_type: "snapshot" }), false);
 });
+
+test("isUsableSnapshot rejects 'File Not Found' content", () => {
+  assert.equal(isUsableSnapshot({ title: "UAE General Civil Aviation Authority", summary: "File Not Found", reliability: "reliable" }), false);
+});
+
+test("isUsableSnapshot rejects 'Page not found' content", () => {
+  assert.equal(isUsableSnapshot({ title: "Some Source", summary: "The page you requested was not found on this server.", reliability: "reliable" }), false);
+});
+
+test("isUsableSnapshot rejects '404 Not Found' content", () => {
+  assert.equal(isUsableSnapshot({ title: "404 Not Found", summary: "This page has been removed or is unavailable.", reliability: "reliable" }), false);
+});

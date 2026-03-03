@@ -3,6 +3,8 @@ import { PROJECT_NAME } from "@/lib/sources";
 import { INDIA_TRANSIT_VISA_LINKS, OFFICIAL_DIRECTORY } from "@/lib/resource-directory";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 type Row = {
   source_id: string;
   source_name: string;

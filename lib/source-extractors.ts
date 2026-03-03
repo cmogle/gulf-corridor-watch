@@ -1,5 +1,6 @@
 import type { SourceDef } from "./sources";
 import { isUnusableSourceText, sanitizeSourceText } from "./source-quality";
+import { cleanDom } from "./dom-cleanup";
 
 type HtmlExtractResult = {
   title: string;
@@ -215,13 +216,15 @@ function selectSummary(candidates: Array<string | null | undefined>, fallbackTex
 
 function extractBase(source: SourceDef, html: string): { pageTitle: string; rawText: string; publishedAt: string | null } {
   const pageTitle = readTitleTag(html) ?? source.name;
-  const rawText = stripHtml(html).slice(0, 10000);
+  const cleaned = cleanDom(html);
+  const rawText = stripHtml(cleaned).slice(0, 10000);
   const publishedAt = readDate(html);
   return { pageTitle, rawText, publishedAt };
 }
 
 function extractBySource(source: SourceDef, html: string): { title: string; summary: string; publishedAt: string | null; rawText: string } {
   const base = extractBase(source, html);
+  const cleaned = cleanDom(html);
 
   if (source.extractor_id === "emirates_updates") {
     const title = readMeta(html, "og:title") ?? readMeta(html, "section") ?? base.pageTitle;
@@ -229,8 +232,8 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
       [
         readMeta(html, "description"),
         readMeta(html, "og:description"),
-        ...readTagTexts(html, "h1", 2),
-        ...readTagTexts(html, "h2", 4),
+        ...readTagTexts(cleaned, "h1", 2),
+        ...readTagTexts(cleaned, "h2", 4),
       ],
       base.rawText,
     );
@@ -244,7 +247,7 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
         readMeta(html, "description"),
         readMeta(html, "og:description"),
         ...readJsonLdTextCandidates(html),
-        ...readTagTexts(html, "h2", 4),
+        ...readTagTexts(cleaned, "h2", 4),
       ],
       base.rawText,
     );
@@ -257,8 +260,8 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
       [
         readMeta(html, "description"),
         readMeta(html, "og:description"),
-        ...readTagTexts(html, "h2", 4),
-        ...readAnchorsWithKeywords(html, ["travel", "advisory", "update", "flight", "service"], 5),
+        ...readTagTexts(cleaned, "h2", 4),
+        ...readAnchorsWithKeywords(cleaned, ["travel", "advisory", "update", "flight", "service"], 5),
       ],
       base.rawText,
     );
@@ -270,8 +273,8 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
     const summary = selectSummary(
       [
         readMeta(html, "description"),
-        ...readAnchorsWithKeywords(html, ["road", "metro", "transport", "service", "rta", "traffic", "dubai"], 6),
-        ...readTagTexts(html, "h3", 6),
+        ...readAnchorsWithKeywords(cleaned, ["road", "metro", "transport", "service", "rta", "traffic", "dubai"], 6),
+        ...readTagTexts(cleaned, "h3", 6),
       ],
       base.rawText,
     );
@@ -286,13 +289,13 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
       /summon|expel|protest|attack|missile|clos|ambassador|condemn|solidarity|evacuat|statement|urgent|crisis/i.test(h)
     ) ?? headings[0] ?? null;
     const title = latestBreaking ?? readMeta(html, "og:title") ?? "UAE Ministry of Foreign Affairs";
-    const titleAttrs = Array.from(html.matchAll(/title=["']([^"']{24,220})["']/gi)).map((m) => sanitizeSourceText(decodeEntities(m[1])));
+    const titleAttrs = Array.from(cleaned.matchAll(/title=["']([^"']{24,220})["']/gi)).map((m) => sanitizeSourceText(decodeEntities(m[1])));
     const summary = selectSummary(
       [
         headings.slice(0, 5).join(" | ") || null,
         readMeta(html, "description"),
         ...titleAttrs.slice(0, 4),
-        ...readAnchorsWithKeywords(html, ["uae", "minister", "foreign", "embassy", "statement", "iran", "attack", "condemn", "solidarity"], 6),
+        ...readAnchorsWithKeywords(cleaned, ["uae", "minister", "foreign", "embassy", "statement", "iran", "attack", "condemn", "solidarity"], 6),
       ],
       base.rawText,
     );
@@ -309,7 +312,7 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
         headings.slice(0, 5).join(" | ") || null,
         readMeta(html, "description"),
         ...readJsonLdTextCandidates(html),
-        ...readAnchorsWithKeywords(html, ["dubai", "airport", "transport", "rta", "travel", "road", "metro", "flight"], 6),
+        ...readAnchorsWithKeywords(cleaned, ["dubai", "airport", "transport", "rta", "travel", "road", "metro", "flight"], 6),
       ],
       base.rawText,
     );
@@ -325,8 +328,8 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
       [
         headings.slice(0, 5).join(" | ") || null,
         readMeta(html, "description"),
-        ...readAnchorsWithKeywords(html, ["advisory", "gulf", "iran", "uae", "evacuation", "travel", "operation", "statement", "ministry"], 10),
-        ...readTagTexts(html, "h2", 4),
+        ...readAnchorsWithKeywords(cleaned, ["advisory", "gulf", "iran", "uae", "evacuation", "travel", "operation", "statement", "ministry"], 10),
+        ...readTagTexts(cleaned, "h2", 4),
       ],
       base.rawText,
     );
@@ -341,8 +344,8 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
       [
         headings.slice(0, 4).join(" | ") || null,
         readMeta(html, "description"),
-        ...readAnchorsWithKeywords(html, ["notice", "immigration", "advisory", "entry", "exit", "visa", "circular", "suspended", "restricted"], 10),
-        ...readTagTexts(html, "h2", 4),
+        ...readAnchorsWithKeywords(cleaned, ["notice", "immigration", "advisory", "entry", "exit", "visa", "circular", "suspended", "restricted"], 10),
+        ...readTagTexts(cleaned, "h2", 4),
       ],
       base.rawText,
     );
@@ -355,8 +358,8 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
       readMeta(html, "description"),
       readMeta(html, "og:description"),
       ...readJsonLdTextCandidates(html),
-      ...readTagTexts(html, "h2", 4),
-      ...readTagTexts(html, "p", 6),
+      ...readTagTexts(cleaned, "h2", 4),
+      ...readTagTexts(cleaned, "p", 6),
     ],
     base.rawText,
   );

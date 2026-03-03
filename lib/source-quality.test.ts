@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isUsableSnapshot, isUsableFeedItem } from "./source-quality.ts";
+import { isUsableSnapshot, isUsableFeedItem, isLowConfidenceExtraction } from "./source-quality.ts";
 
 test("isUsableSnapshot rejects blocked reliability", () => {
   assert.equal(isUsableSnapshot({ title: "Emirates", summary: "Normal ops", reliability: "blocked" }), false);
@@ -45,4 +45,29 @@ test("isUsableSnapshot rejects 'Page not found' content", () => {
 
 test("isUsableSnapshot rejects '404 Not Found' content", () => {
   assert.equal(isUsableSnapshot({ title: "404 Not Found", summary: "This page has been removed or is unavailable.", reliability: "reliable" }), false);
+});
+
+test("isLowConfidenceExtraction returns true for summary under 50 chars", () => {
+  assert.equal(isLowConfidenceExtraction("Short.", "Emirates Travel Updates"), true);
+});
+
+test("isLowConfidenceExtraction returns true when summary overlaps 90%+ with source name", () => {
+  assert.equal(
+    isLowConfidenceExtraction("Emirates Travel Updates information", "Emirates Travel Updates"),
+    true,
+  );
+});
+
+test("isLowConfidenceExtraction returns false for substantive summary", () => {
+  assert.equal(
+    isLowConfidenceExtraction(
+      "All flights from Dubai International are operating on schedule. Passengers are advised to check gate information.",
+      "Emirates Travel Updates",
+    ),
+    false,
+  );
+});
+
+test("isLowConfidenceExtraction returns true for mostly non-alphabetic text", () => {
+  assert.equal(isLowConfidenceExtraction("* A+ A A- *** --- === |||  ### >>>", "Some Source"), true);
 });

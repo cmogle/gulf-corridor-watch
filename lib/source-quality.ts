@@ -76,3 +76,29 @@ export function isUsableFeedItem(item: FeedItemLike): boolean {
   const merged = `${item.headline} ${item.summary}`;
   return !isUnusableSourceText(merged);
 }
+
+/**
+ * Detect low-confidence extractions that pass unusability checks
+ * but are still too poor to display as reliable content.
+ * Used to trigger LLM fallback extraction.
+ */
+export function isLowConfidenceExtraction(summary: string, sourceName: string): boolean {
+  const cleaned = sanitizeSourceText(summary);
+
+  // Too short to be meaningful
+  if (cleaned.length < 50) return true;
+
+  // Mostly non-alphabetic (nav chrome, symbols, formatting artifacts)
+  const alphaChars = cleaned.replace(/[^a-zA-Z]/g, "").length;
+  if (alphaChars / Math.max(cleaned.length, 1) < 0.2) return true;
+
+  // Summary word overlap with source name > 90%
+  const summaryWords = new Set(cleaned.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+  const nameWords = new Set(sourceName.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+  if (summaryWords.size > 0 && nameWords.size > 0) {
+    const overlap = [...summaryWords].filter(w => nameWords.has(w)).length;
+    if (overlap / summaryWords.size > 0.9) return true;
+  }
+
+  return false;
+}

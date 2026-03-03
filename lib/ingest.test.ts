@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatRssSummary, pickBestRssItemsScored } from "./ingest.ts";
+import { formatRssSummary, pickBestRssItemsScored, ingestSingleSource } from "./ingest.ts";
 
 test("formatRssSummary returns single item as direct headline + summary", () => {
   const result = formatRssSummary([
@@ -69,4 +69,8 @@ test("pickBestRssItemsScored caps at maxItems", () => {
   }));
   const result = pickBestRssItemsScored(items, 3);
   assert.equal(result.length, 3);
+});
+
+test("ingestSingleSource is exported as a function", () => {
+  assert.equal(typeof ingestSingleSource, "function");
 });

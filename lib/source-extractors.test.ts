@@ -134,6 +134,34 @@ test("extractHtmlSnapshot marks unusable when summary equals source name", () =>
   assert.equal(result.unusable, true);
 });
 
+test("extractHtmlSnapshot strips nav chrome before extraction", () => {
+  const source = {
+    id: "test_source",
+    name: "Air Arabia Travel Updates",
+    url: "https://example.com",
+    category: "airline" as const,
+    parser: "html" as const,
+    connector: "direct_html" as const,
+    extractor_id: "html_title_text" as const,
+    priority: 85,
+    freshness_target_minutes: 10,
+    region: "UAE",
+  };
+  const html = `<html><head><title>Air Arabia Travel Updates</title>
+    <meta name="description" content="Check the latest travel alerts and flight status for Air Arabia.">
+  </head><body>
+    <nav><ul><li>LOGIN</li><li>United Arab Emirates</li><li>AED</li><li>en</li></ul></nav>
+    <header><div>Skip to main content</div></header>
+    <main><p>Check the latest travel alerts and flight status for Air Arabia.</p></main>
+    <footer>Copyright 2026 Air Arabia</footer>
+  </body></html>`;
+  const result = extractHtmlSnapshot(source, html);
+  // Should get the meta description or main content, not nav chrome
+  assert.ok(!result.summary.includes("LOGIN"));
+  assert.ok(!result.summary.includes("Skip to main content"));
+  assert.ok(result.summary.includes("travel alerts"));
+});
+
 test("extractHtmlSnapshot does not mark unusable when summary has real content", () => {
   const source = {
     id: "test_source",

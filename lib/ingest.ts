@@ -12,6 +12,8 @@ import {
   validateOfficialUpdate,
   ValidationMetadata,
 } from "./update-validation";
+import { isLowConfidenceExtraction } from "./source-quality";
+import { llmExtractSummary } from "./llm-extract";
 
 type Snapshot = {
   source_id: string;
@@ -454,15 +456,101 @@ async function fetchSource(source: SourceDef): Promise<Snapshot> {
   }
 }
 
+export async function ingestSingleSource(source: SourceDef): Promise<{
+  snapshot: Snapshot;
+  llm_fallback_used: boolean;
+}> {
+  const supabase = getSupabaseAdmin();
+
+  // Fetch
+  let snapshot = await fetchSource(source);
+
+  // LLM fallback if extraction is low confidence but not already degraded/blocked
+  let llmFallbackUsed = false;
+  if (
+    snapshot.reliability === "reliable" &&
+    isLowConfidenceExtraction(snapshot.summary, source.name)
+  ) {
+    const llmSummary = await llmExtractSummary(source.name, snapshot.raw_text);
+    if (llmSummary) {
+      snapshot = { ...snapshot, summary: llmSummary };
+      llmFallbackUsed = true;
+    } else {
+      snapshot = {
+        ...snapshot,
+        reliability: "degraded",
+        block_reason: "No extractable content (LLM fallback returned empty)",
+        summary: "Source page content was unavailable or non-usable in this fetch. Open Official source for live details.",
+        status_level: "unknown",
+      };
+    }
+  }
+
+  // Validate
+  const latestMap = await loadLatestSnapshotValidationBySource(supabase, [source.id]);
+  const contentHash = computeUpdateContentHash({
+    source_id: snapshot.source_id,
+    update_type: "snapshot",
+    headline: snapshot.title,
+    summary: snapshot.summary,
+    original_url: snapshot.source_url,
+  });
+  const previous = latestMap.get(source.id);
+  let validated: Snapshot;
+  if (previous?.content_hash && previous.content_hash === contentHash) {
+    validated = withValidation(snapshot, contentHash, {
+      validation_state: previous.validation_state,
+      validation_score: previous.validation_score,
+      validation_reason: previous.validation_reason,
+      validation_model: previous.validation_model,
+      validated_at: previous.validated_at,
+    });
+  } else if (/fetch error/i.test(snapshot.title)) {
+    validated = withValidation(snapshot, contentHash, skippedValidation("Skipped GPT validation for fetch-error snapshot"));
+  } else {
+    const validation = await validateOfficialUpdate({
+      source_id: snapshot.source_id,
+      update_type: "snapshot",
+      headline: snapshot.title,
+      summary: snapshot.summary,
+      original_url: snapshot.source_url,
+      raw_text: snapshot.raw_text,
+    });
+    validated = withValidation(snapshot, contentHash, validation);
+  }
+
+  // Persist
+  const { error } = await supabase.from("source_snapshots").insert([validated]);
+  if (error) throw error;
+
+  return { snapshot: validated, llm_fallback_used: llmFallbackUsed };
+}
+
 export async function runIngestion(opts?: { scope?: IngestScope }) {
   const scope = opts?.scope ?? "full";
   const supabase = getSupabaseAdmin();
-  const snapshots: Snapshot[] = [];
   const sources = getSourcesForScope(scope);
-  const latestSnapshotValidation = await loadLatestSnapshotValidationBySource(
-    supabase,
-    sources.map((source) => source.id),
-  );
+
+  const results: Array<{ source_id: string; reliability: string; llm_fallback_used: boolean; error?: string }> = [];
+
+  for (const source of sources) {
+    try {
+      const result = await ingestSingleSource(source);
+      results.push({
+        source_id: source.id,
+        reliability: result.snapshot.reliability,
+        llm_fallback_used: result.llm_fallback_used,
+      });
+    } catch (error) {
+      results.push({
+        source_id: source.id,
+        reliability: "degraded",
+        llm_fallback_used: false,
+        error: String(error),
+      });
+    }
+  }
+
   const validationBudget = getValidationMaxPerIngest();
   let validationRuns = 0;
   let flightCount = 0;
@@ -474,70 +562,6 @@ export async function runIngestion(opts?: { scope?: IngestScope }) {
   let briefRegenerated: boolean | null = null;
   let briefReason: string | null = null;
   let briefError: string | null = null;
-
-  async function validateSnapshot(snapshot: Snapshot): Promise<Snapshot> {
-    const contentHash = computeUpdateContentHash({
-      source_id: snapshot.source_id,
-      update_type: "snapshot",
-      headline: snapshot.title,
-      summary: snapshot.summary,
-      original_url: snapshot.source_url,
-    });
-    const previous = latestSnapshotValidation.get(snapshot.source_id);
-    if (previous?.content_hash && previous.content_hash === contentHash) {
-      return withValidation(snapshot, contentHash, {
-        validation_state: previous.validation_state,
-        validation_score: previous.validation_score,
-        validation_reason: previous.validation_reason,
-        validation_model: previous.validation_model,
-        validated_at: previous.validated_at,
-      });
-    }
-
-    if (/fetch error/i.test(snapshot.title)) {
-      return withValidation(snapshot, contentHash, skippedValidation("Skipped GPT validation for fetch-error snapshot"));
-    }
-    if (validationRuns >= validationBudget) {
-      return withValidation(snapshot, contentHash, skippedValidation(`Validation budget reached (${validationBudget} items)`));
-    }
-
-    validationRuns += 1;
-    const validation = await validateOfficialUpdate({
-      source_id: snapshot.source_id,
-      update_type: "snapshot",
-      headline: snapshot.title,
-      summary: snapshot.summary,
-      original_url: snapshot.source_url,
-      raw_text: snapshot.raw_text,
-    });
-    return withValidation(snapshot, contentHash, validation);
-  }
-
-  // Phase 1: Fetch all sources in parallel
-  const fetchResults = await Promise.allSettled(
-    sources.map((source) => fetchSource(source))
-  );
-
-  // Phase 2: Validate sequentially (respects validation budget)
-  for (const result of fetchResults) {
-    if (result.status === "rejected") continue; // fetchSource never rejects; defensive skip
-    const snapshot = result.value;
-    const validated = await validateSnapshot(snapshot);
-    snapshots.push(validated);
-    latestSnapshotValidation.set(snapshot.source_id, {
-      source_id: snapshot.source_id,
-      content_hash: validated.content_hash,
-      validation_state: validated.validation_state,
-      validation_score: validated.validation_score,
-      validation_reason: validated.validation_reason,
-      validation_model: validated.validation_model,
-      validated_at: validated.validated_at,
-      fetched_at: validated.fetched_at,
-    });
-  }
-
-  const { error } = await supabase.from("source_snapshots").insert(snapshots);
-  if (error) throw error;
 
   if (scope === "airline" || scope === "full") {
     try {
@@ -672,8 +696,8 @@ export async function runIngestion(opts?: { scope?: IngestScope }) {
 
   return {
     scope,
-    count: snapshots.length,
-    snapshots,
+    count: results.length,
+    results,
     flight_count: flightCount,
     flight_error: flightError,
     signal_count: signalCount,

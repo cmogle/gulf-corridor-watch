@@ -7,6 +7,7 @@ import type {
   UnifiedUpdateItem,
   UnifiedUpdateRow,
 } from "./unified-updates-types.ts";
+import { isUsableFeedItem } from "./source-quality.ts";
 
 type LoadSourceHistoryOptions = {
   limit?: number;
@@ -33,6 +34,18 @@ export function deduplicateFeedItems(items: UnifiedUpdateItem[]): UnifiedUpdateI
   return out;
 }
 
+export function filterAndDeduplicateFeed(items: UnifiedUpdateItem[]): UnifiedUpdateItem[] {
+  const usable = items.filter((item) =>
+    isUsableFeedItem({
+      headline: item.headline,
+      summary: item.summary,
+      reliability: item.reliability,
+      update_type: item.update_type,
+    }),
+  );
+  return deduplicateFeedItems(usable);
+}
+
 export async function loadUnifiedFeed(limit?: number): Promise<UnifiedUpdateItem[]> {
   const pageSize = clampLimit(limit);
   const supabase = getSupabaseAdmin();
@@ -42,7 +55,8 @@ export async function loadUnifiedFeed(limit?: number): Promise<UnifiedUpdateItem
   if (error) throw error;
 
   const mapped = ((data ?? []) as UnifiedUpdateRow[]).map(normalizeUnifiedUpdateRow);
-  return sortUnifiedUpdates(mapped).slice(0, pageSize);
+  const cleaned = filterAndDeduplicateFeed(mapped);
+  return sortUnifiedUpdates(cleaned).slice(0, pageSize);
 }
 
 export async function loadUnifiedSourceHistory(

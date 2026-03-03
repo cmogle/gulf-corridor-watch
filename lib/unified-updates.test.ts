@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deduplicateFeedItems } from "./unified-updates.ts";
+import { deduplicateFeedItems, filterAndDeduplicateFeed } from "./unified-updates.ts";
 import type { UnifiedUpdateItem } from "./unified-updates-types.ts";
 
 function makeItem(overrides: Partial<UnifiedUpdateItem>): UnifiedUpdateItem {
@@ -55,4 +55,17 @@ test("deduplicateFeedItems keeps items from same source with different summaries
 
 test("deduplicateFeedItems handles empty input", () => {
   assert.deepEqual(deduplicateFeedItems([]), []);
+});
+
+test("filterAndDeduplicateFeed filters unusable items then deduplicates", () => {
+  const items = [
+    makeItem({ id: "good", source_id: "emirates", headline: "Emirates Travel Updates", summary: "All flights operating normally today.", reliability: "reliable" }),
+    makeItem({ id: "fetch-err", source_id: "rta_dubai", headline: "RTA Dubai fetch error", summary: "Source fetch failed.", reliability: "degraded" }),
+    makeItem({ id: "blocked", source_id: "etihad", headline: "Etihad", summary: "Access denied", reliability: "blocked" }),
+    makeItem({ id: "dup-newer", source_id: "uae_mofa", headline: "MOFA", summary: "Statement on regional security.", event_at: "2026-03-03T14:00:00Z", reliability: "reliable" }),
+    makeItem({ id: "dup-older", source_id: "uae_mofa", headline: "MOFA", summary: "Statement on regional security.", event_at: "2026-03-03T12:00:00Z", reliability: "reliable" }),
+  ];
+  const result = filterAndDeduplicateFeed(items);
+  assert.equal(result.length, 2);
+  assert.deepEqual(result.map((i) => i.id).sort(), ["dup-newer", "good"]);
 });

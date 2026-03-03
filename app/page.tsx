@@ -267,9 +267,9 @@ export default async function Home({ searchParams }: HomeProps) {
   const unknown = usableRows.filter((r) => r.status_level === "unknown").length;
 
   return (
-    <main className="mx-auto max-w-[1400px] p-4 md:p-6">
+    <main className="mx-auto max-w-[1400px] overflow-x-hidden p-4 md:p-6">
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_390px]">
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           {currentBrief ? (
             <section className="rounded-2xl border border-zinc-300 bg-white/90 p-4 md:p-6 shadow-[0_10px_40px_rgba(10,28,42,0.08)]">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -295,7 +295,7 @@ export default async function Home({ searchParams }: HomeProps) {
             <div className="space-y-1">
               <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Operational Control</p>
               <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{PROJECT_NAME}</h1>
-              <p className="max-w-2xl text-sm text-zinc-700">Fastest path to relevant travel status: query flights first, then use official-source cards for policy and advisory context.</p>
+              <p className="text-sm text-zinc-700">Fastest path to relevant travel status: query flights first, then use official-source cards for policy and advisory context.</p>
             </div>
           </div>
 
@@ -303,12 +303,12 @@ export default async function Home({ searchParams }: HomeProps) {
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(200,235,255,0.55),transparent_45%),radial-gradient(circle_at_85%_80%,rgba(255,232,200,0.6),transparent_50%)]" />
         <div className="pointer-events-none absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(20,20,20,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(20,20,20,0.06)_1px,transparent_1px)] [background-size:24px_24px]" />
         <div className="relative space-y-4">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
               <h2 className="text-lg font-semibold tracking-tight">Flight-First Query</h2>
-              <p className="text-sm text-zinc-700">Ask by flight, route, or scenario. Results include latest known status and last update time.</p>
+              <p className="text-sm text-zinc-700">Query by flight, route, or scenario.</p>
             </div>
-            <p className="text-xs text-zinc-600">Latest fetch: {pulse.latestFetch ? new Date(pulse.latestFetch).toLocaleString() : "n/a"}</p>
+            <p className="shrink-0 text-xs text-zinc-600">Fetched: {pulse.latestFetch ? new Date(pulse.latestFetch).toLocaleString() : "n/a"}</p>
           </div>
 
           <FlightSearchWidget suggestedPrompts={suggestedFlightPrompts} latestFetch={pulse.latestFetch} />

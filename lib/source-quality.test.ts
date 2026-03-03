@@ -112,6 +112,16 @@ test("isLowConfidenceExtraction catches consecutive duplicate words", () => {
   );
 });
 
+test("isLowConfidenceExtraction catches A+ A A- font size toggles", () => {
+  assert.equal(
+    isLowConfidenceExtraction(
+      "Bureau of Immigration - BOI भारत सरकार GOVERNMENT OF INDIA * A+ A A- BUREAU OF IMMIGRATION Ministry of Home Affairs, Government of India Immigration About Us Vision Mission",
+      "India Bureau of Immigration",
+    ),
+    true,
+  );
+});
+
 test("isLowConfidenceExtraction passes real news content with nav-like words", () => {
   assert.equal(
     isLowConfidenceExtraction(

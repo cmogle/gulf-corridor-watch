@@ -27,7 +27,7 @@
   ],
   "functions": {
     "app/api/ingest/[sourceId]/route.ts": {
-      "maxDuration": 60
+      "maxDuration": 120
     },
     "app/api/ingest/route.ts": {
       "maxDuration": 300

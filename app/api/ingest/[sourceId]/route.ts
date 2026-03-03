@@ -1,7 +1,7 @@
 import { OFFICIAL_SOURCES } from "@/lib/sources";
 import { ingestSingleSource } from "@/lib/ingest";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function GET(
   req: Request,

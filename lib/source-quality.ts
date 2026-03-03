@@ -98,6 +98,7 @@ const NAV_CHROME_PATTERNS = [
   /\benglish\b.*\b(deutsch|español|français|italiano|العربية|русский|türkçe)\b/i,
   /\b(book|search|manage|experience)\b.*\b(book|search|manage|experience)\b.*\b(book|search|manage|experience)\b/i,
   /log\s*in\s+air\s*rewards/i,
+  /\bA\+\s+A\s+A-/,
 ];
 
 /**

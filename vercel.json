@@ -8,5 +8,13 @@
       "path": "/api/ingest?key=@ingest_secret&scope=full",
       "schedule": "*/15 * * * *"
     }
-  ]
+  ],
+  "functions": {
+    "app/api/ingest/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/chat/route.ts": {
+      "maxDuration": 60
+    }
+  }
 }

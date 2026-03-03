@@ -1,7 +1,7 @@
 export type SourceDef = {
   id: string;
   name: string;
-  category: "government" | "airline" | "transport";
+  category: "government" | "airline" | "transport" | "news";
   url: string;
   parser: "rss" | "html";
   connector: "rss" | "direct_html" | "api";

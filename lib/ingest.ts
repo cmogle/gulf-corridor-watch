@@ -200,8 +200,12 @@ const GULF_CORRIDOR_KEYWORDS = [
   "united arab emirates", "uae", "dubai", "abu dhabi",
   "qatar", "bahrain", "kuwait", "oman", "saudi", "riyadh",
   "iran", "iraq", "jordan", "israel", "gaza", "lebanon",
+  "yemen", "syria", "red sea", "middle east", "gulf region",
   "india", "level 4", "level 3", "do not travel", "reconsider travel",
   "ordered departure", "evacuation", "emergency",
+  "missile", "drone", "uav", "fighter", "military", "strike",
+  "retaliation", "air defense", "centcom", "pentagon", "white house",
+  "president trump", "trump", "posture", "deployment",
 ];
 
 type RssItem = {

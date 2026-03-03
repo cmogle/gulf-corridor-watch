@@ -93,6 +93,9 @@ npm run dev
 
 ## Sources (initial set)
 - US State Dept travel advisories (RSS)
+- White House statements/releases (RSS)
+- US Department of Defense releases (RSS)
+- US CENTCOM news (RSS)
 - UAE MOFA (HTML)
 - Dubai official news (HTML)
 - Emirates travel updates (HTML)

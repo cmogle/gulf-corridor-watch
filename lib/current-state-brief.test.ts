@@ -247,6 +247,57 @@ test("fallback paragraph strips markdown/url artifacts from source evidence", ()
   assert.doesNotMatch(paragraph, /Markdown Content|URL Source|!\[Image|http:\/\//i);
 });
 
+test("fallback paragraph filters out non-regional global advisories", () => {
+  const paragraph = buildFallbackBriefParagraph(
+    makeContext({
+      sources: [
+        {
+          source_id: "us_state_dept_travel",
+          source_name: "US State Dept Travel Advisories",
+          status_level: "advisory",
+          reliability: "reliable",
+          validation_state: "validated",
+          priority: 85,
+          fetched_at: "2026-03-03T10:07:00.000Z",
+          published_at: null,
+          freshness_target_minutes: 15,
+          title: "Sudan advisory update",
+          summary: "Embassy in Khartoum suspended operations in April 2023 due to the outbreak.",
+          stale: false,
+        },
+        {
+          source_id: "uae_mofa",
+          source_name: "UAE Ministry of Foreign Affairs",
+          status_level: "advisory",
+          reliability: "reliable",
+          validation_state: "validated",
+          priority: 90,
+          fetched_at: "2026-03-03T10:08:00.000Z",
+          published_at: null,
+          freshness_target_minutes: 10,
+          title: "Joint Statement Condemning Iran’s Missile and Drone Attacks in the Region",
+          summary: "Official statement addressing regional missile and drone escalation.",
+          stale: false,
+        },
+      ],
+      coverage: {
+        sources_included: ["us_state_dept_travel", "uae_mofa"],
+        stale_sources: [],
+        missing_expected: [],
+      },
+      flight: {
+        total: 12,
+        delayed: 0,
+        cancelled: 0,
+        latest_fetch: "2026-03-03T10:09:00.000Z",
+        stale: false,
+      },
+    }),
+  );
+  assert.match(paragraph, /Iran’s Missile and Drone Attacks/i);
+  assert.doesNotMatch(paragraph, /Khartoum/i);
+});
+
 test("hash changes when narrative policy version changes", () => {
   const base = makeContext();
   const current = computeBriefInputHash(base);

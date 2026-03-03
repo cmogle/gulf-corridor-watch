@@ -7,9 +7,9 @@ const BRIEF_KEY = "global";
 const DEFAULT_MODEL = "gpt-4o-mini";
 const DEFAULT_TIMEOUT_MS = 8000;
 const EXPECTED_MISSING_SOURCES = ["india_consulate_dubai", "india_embassy_abu_dhabi", "broader_mena_ministries"];
-export const NARRATIVE_POLICY_VERSION = "v4_uae_airspace_sitrep_extractive";
+export const NARRATIVE_POLICY_VERSION = "v5_uae_airspace_sitrep_regional_instability";
 const DEFAULT_BRIEF_GENERATION_MODE = "extractive";
-const AIRSPACE_RELEVANCE_KEYWORDS = [
+const SECURITY_RELEVANCE_KEYWORDS = [
   "airspace",
   "air traffic",
   "airport",
@@ -34,7 +34,47 @@ const AIRSPACE_RELEVANCE_KEYWORDS = [
   "intercept",
   "sirens",
   "security alert",
+  "strike",
+  "retaliation",
+  "posture",
+  "deployment",
+  "president trump",
+  "trump",
+  "pentagon",
+  "centcom",
+  "white house",
 ];
+const REGIONAL_RELEVANCE_KEYWORDS = [
+  "uae",
+  "united arab emirates",
+  "dubai",
+  "abu dhabi",
+  "gulf",
+  "middle east",
+  "iran",
+  "iraq",
+  "israel",
+  "gaza",
+  "lebanon",
+  "jordan",
+  "qatar",
+  "oman",
+  "bahrain",
+  "kuwait",
+  "saudi",
+  "yemen",
+  "syria",
+  "red sea",
+  "strait of hormuz",
+];
+const ALWAYS_RELEVANT_SOURCE_IDS = new Set([
+  "uae_mofa",
+  "visit_dubai_news",
+  "emirates_updates",
+  "etihad_advisory",
+  "oman_air",
+  "rta_dubai",
+]);
 
 export type BriefFreshnessState = "fresh" | "mixed" | "stale";
 export type BriefConfidence = "high" | "medium" | "low";
@@ -316,10 +356,29 @@ function normalizeForDedup(text: string): string {
 function relevanceScore(text: string): number {
   const normalized = text.toLowerCase();
   let score = 0;
-  for (const keyword of AIRSPACE_RELEVANCE_KEYWORDS) {
+  for (const keyword of SECURITY_RELEVANCE_KEYWORDS) {
+    if (normalized.includes(keyword)) score += 1;
+  }
+  for (const keyword of REGIONAL_RELEVANCE_KEYWORDS) {
     if (normalized.includes(keyword)) score += 1;
   }
   return score;
+}
+
+function keywordHitCount(text: string, keywords: string[]): number {
+  const normalized = text.toLowerCase();
+  let hits = 0;
+  for (const keyword of keywords) {
+    if (normalized.includes(keyword)) hits += 1;
+  }
+  return hits;
+}
+
+function isRegionallyRelevantEvidence(text: string, sourceId: string): boolean {
+  if (ALWAYS_RELEVANT_SOURCE_IDS.has(sourceId) || sourceId.startsWith("flightradar_")) return true;
+  const securityHits = keywordHitCount(text, SECURITY_RELEVANCE_KEYWORDS);
+  const regionalHits = keywordHitCount(text, REGIONAL_RELEVANCE_KEYWORDS);
+  return securityHits > 0 && regionalHits > 0;
 }
 
 function escapeRegExp(text: string): string {
@@ -407,6 +466,7 @@ function selectNarrativeEvidenceRows(context: BriefInputContext, maxRows = 2): N
   for (const row of rows) {
     const evidenceText = buildEvidenceClause(row);
     if (isLowValueEvidence(evidenceText)) continue;
+    if (!isRegionallyRelevantEvidence(evidenceText, row.source_id)) continue;
     if (relevanceScore(evidenceText) === 0) continue;
     const key = normalizeForDedup(evidenceText);
     if (!key || seen.has(key)) continue;
@@ -433,6 +493,7 @@ function selectCorroboratedSocialRows(context: BriefInputContext, maxRows = 2): 
       if (!(source.status_level === "advisory" || source.status_level === "disrupted")) return null;
       const cleanText = compact(cleanEvidenceText(row.text_display), 120);
       if (isLowValueEvidence(cleanText)) return null;
+      if (!isRegionallyRelevantEvidence(cleanText, row.source_id)) return null;
       if (relevanceScore(cleanText) === 0) return null;
       return {
         source_id: row.source_id,
@@ -463,7 +524,7 @@ function buildNarrativeBasis(context: BriefInputContext): NarrativeBasis {
 
 function hasSecuritySignal(rows: NarrativeEvidenceRow[], socialRows: CorroboratedSocialRow[]): boolean {
   const combined = [...rows.map((row) => row.clause), ...socialRows.map((row) => row.text)].join(" ").toLowerCase();
-  return /\b(missile|drone|uav|fighter|military|air defense|intercept|sirens)\b/i.test(combined);
+  return keywordHitCount(combined, SECURITY_RELEVANCE_KEYWORDS) > 0;
 }
 
 function deriveAirspacePosture(context: BriefInputContext, basis: NarrativeBasis): "normal" | "heightened" | "unclear" {

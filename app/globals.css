@@ -1,19 +1,31 @@
 @import "tailwindcss";
 
-:root {
-  --surface-dark: #111827;
-  --surface-dark-heightened: #7C2D12;
-  --surface-dark-unclear: #1E293B;
-  --surface-light: #FAFAF9;
-  --card: #FFFFFF;
-  --primary-blue: #2563EB;
-  --amber: #D97706;
-  --red: #DC2626;
-  --green: #16A34A;
-  --text-primary: #111827;
-  --text-secondary: #6B7280;
-  --text-on-dark: #F9FAFB;
-  --text-on-dark-muted: rgba(249, 250, 251, 0.6);
+@layer base {
+  :root {
+    --surface-dark: #111827;
+    --surface-dark-heightened: #7C2D12;
+    --surface-dark-unclear: #1E293B;
+    --surface-light: #FAFAF9;
+    --card: #FFFFFF;
+    --primary-blue: #2563EB;
+    --amber: #D97706;
+    --red: #DC2626;
+    --green: #16A34A;
+    --text-primary: #111827;
+    --text-secondary: #6B7280;
+    --text-on-dark: #F9FAFB;
+    --text-on-dark-muted: rgba(249, 250, 251, 0.6);
+  }
+
+  body {
+    background: var(--surface-light);
+    color: var(--text-primary);
+    font-family: "DM Sans", system-ui, sans-serif;
+  }
+
+  * {
+    border-color: #E5E7EB;
+  }
 }
 
 @theme inline {
@@ -22,16 +34,6 @@
   --font-sans: "DM Sans", system-ui, sans-serif;
   --font-serif: "DM Serif Display", Georgia, serif;
   --font-mono: "JetBrains Mono", "Fira Code", monospace;
-}
-
-body {
-  background: var(--surface-light);
-  color: var(--text-primary);
-  font-family: "DM Sans", system-ui, sans-serif;
-}
-
-* {
-  border-color: #E5E7EB;
 }
 
 @media (prefers-reduced-motion: reduce) {

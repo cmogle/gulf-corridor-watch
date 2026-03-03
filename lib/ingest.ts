@@ -189,7 +189,7 @@ async function fetchTextWithFallback(urls: string[], mode: "rss" | "html"): Prom
       const text = await res.text();
       const reliable = inferReliability(text, res.status);
       const looksLikeRss = /<rss[\s>]|<feed[\s>]/i.test(text);
-      if (mode === "rss" && !looksLikeRss && !fromMirror) {
+      if (mode === "rss" && !looksLikeRss) {
         throw new Error(`Not RSS content (${res.status})`);
       }
       if (!res.ok || reliable === "blocked") {

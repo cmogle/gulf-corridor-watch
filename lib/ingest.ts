@@ -418,6 +418,42 @@ function getSourcesForScope(scope: IngestScope): SourceDef[] {
   return OFFICIAL_SOURCES;
 }
 
+async function fetchSource(source: SourceDef): Promise<Snapshot> {
+  try {
+    return source.parser === "rss" ? await fetchRss(source) : await fetchHtml(source);
+  } catch (error) {
+    const errorText = String(error);
+    const blocked = /403|401|429|denied|rejected|forbidden|captcha/i.test(errorText);
+    return {
+      source_id: source.id,
+      source_name: source.name,
+      source_url: source.url,
+      category: source.category,
+      fetched_at: new Date().toISOString(),
+      published_at: null,
+      title: `${source.name} fetch error`,
+      summary: blocked
+        ? "Source currently blocked or challenge-protected. Open Official source for live details."
+        : "Source fetch failed during ingestion. Open Official source for live details.",
+      raw_text: "",
+      status_level: "unknown",
+      ingest_method: source.parser === "rss" ? "rss" : "official_web",
+      reliability: blocked ? "blocked" : "degraded",
+      block_reason: blocked ? errorText.slice(0, 200) : null,
+      priority: source.priority,
+      freshness_target_minutes: source.freshness_target_minutes,
+      evidence_basis: source.parser === "rss" ? "rss" : "official_web",
+      confirmation_state: "confirmed",
+      content_hash: null,
+      validation_state: "unvalidated",
+      validation_score: null,
+      validation_reason: null,
+      validation_model: null,
+      validated_at: null,
+    };
+  }
+}
+
 export async function runIngestion(opts?: { scope?: IngestScope }) {
   const scope = opts?.scope ?? "full";
   const supabase = getSupabaseAdmin();

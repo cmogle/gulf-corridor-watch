@@ -266,6 +266,16 @@ export function formatRssSummary(items: ScoredRssItem[]): { title: string; summa
   };
 }
 
+export function pickBestRssItemsScored(items: RssItem[], maxItems = 6): ScoredRssItem[] {
+  const scored = items.map((item) => {
+    const text = `${item.title ?? ""} ${item.description ?? ""}`.toLowerCase();
+    const score = GULF_CORRIDOR_KEYWORDS.reduce((acc, kw) => acc + (text.includes(kw) ? 1 : 0), 0);
+    return { title: item.title ?? "", description: item.description ?? "", score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, maxItems);
+}
+
 async function fetchRss(source: SourceDef): Promise<Snapshot> {
   const { text: xml, finalUrl, status } = await fetchTextWithFallback([source.url, ...getFallbackUrls(source)], "rss");
   const parsed = parser.parse(xml);

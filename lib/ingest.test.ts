@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatRssSummary } from "./ingest.ts";
+import { formatRssSummary, pickBestRssItemsScored } from "./ingest.ts";
 
 test("formatRssSummary returns single item as direct headline + summary", () => {
   const result = formatRssSummary([
@@ -46,4 +46,27 @@ test("formatRssSummary caps at 4 bullet items", () => {
   const result = formatRssSummary(items);
   const bulletCount = (result.summary.match(/^- /gm) ?? []).length;
   assert.ok(bulletCount <= 4);
+});
+
+test("pickBestRssItemsScored returns scored items sorted by relevance", () => {
+  const items = [
+    { title: "Generic DOD press release", description: "Budget meeting" },
+    { title: "Iran missile test near Gulf region", description: "CENTCOM reports activity near UAE" },
+  ];
+  const result = pickBestRssItemsScored(items);
+  assert.ok(result[0].score > result[1].score);
+  assert.ok(result[0].title.includes("Iran"));
+});
+
+test("pickBestRssItemsScored returns empty when no items", () => {
+  assert.deepEqual(pickBestRssItemsScored([]), []);
+});
+
+test("pickBestRssItemsScored caps at maxItems", () => {
+  const items = Array.from({ length: 10 }, (_, i) => ({
+    title: `UAE item ${i}`,
+    description: `Gulf region update ${i}`,
+  }));
+  const result = pickBestRssItemsScored(items, 3);
+  assert.equal(result.length, 3);
 });

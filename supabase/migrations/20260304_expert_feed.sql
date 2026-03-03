@@ -16,9 +16,11 @@ create table if not exists expert_signals (
   created_at timestamptz not null default now(),
   unique(handle, post_id)
 );
+
 create index if not exists idx_expert_signals_posted on expert_signals(posted_at desc);
 create index if not exists idx_expert_signals_category on expert_signals(category, posted_at desc);
 create index if not exists idx_expert_signals_relevance on expert_signals(relevance_score desc);
+
 create table if not exists expert_digests (
   id uuid primary key default gen_random_uuid(),
   digest_text text not null,
@@ -26,4 +28,5 @@ create table if not exists expert_digests (
   signal_count int not null default 0,
   generated_at timestamptz not null default now()
 );
+
 create index if not exists idx_expert_digests_generated on expert_digests(generated_at desc);

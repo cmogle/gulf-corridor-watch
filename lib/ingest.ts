@@ -225,18 +225,6 @@ type RssItem = {
   link?: string;
 };
 
-function pickBestRssItems(items: RssItem[], maxItems = 6): RssItem[] {
-  // Score each item by Gulf Corridor relevance
-  const scored = items.map((item) => {
-    const text = `${item.title ?? ""} ${item.description ?? ""}`.toLowerCase();
-    const score = GULF_CORRIDOR_KEYWORDS.reduce((acc, kw) => acc + (text.includes(kw) ? 1 : 0), 0);
-    return { item, score };
-  });
-  // Sort by score desc, then take top N (always include score>0 first)
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, maxItems).map((s) => s.item);
-}
-
 type ScoredRssItem = { title: string; description: string; score: number };
 
 export function formatRssSummary(items: ScoredRssItem[]): { title: string; summary: string; isBulletList: boolean } {
@@ -325,7 +313,7 @@ async function fetchRss(source: SourceDef): Promise<Snapshot> {
     }
   } else {
     const formatted = formatRssSummary(scoredItems);
-    title = formatted.title || String(scoredItems[0]?.title ?? source.name);
+    title = formatted.isBulletList ? source.name : (formatted.title || String(scoredItems[0]?.title ?? source.name));
     summary = formatted.summary;
   }
 

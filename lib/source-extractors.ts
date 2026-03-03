@@ -1,5 +1,5 @@
-import type { SourceDef } from "./sources.ts";
-import { isUnusableSourceText, sanitizeSourceText } from "./source-quality.ts";
+import type { SourceDef } from "./sources";
+import { isUnusableSourceText, sanitizeSourceText } from "./source-quality";
 
 type HtmlExtractResult = {
   title: string;

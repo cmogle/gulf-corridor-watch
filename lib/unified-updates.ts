@@ -1,13 +1,13 @@
-import { getSupabaseAdmin } from "./supabase.ts";
+import { getSupabaseAdmin } from "./supabase";
 import {
   normalizeUnifiedUpdateRow,
   sortUnifiedUpdates,
-} from "./unified-updates-types.ts";
+} from "./unified-updates-types";
 import type {
   UnifiedUpdateItem,
   UnifiedUpdateRow,
-} from "./unified-updates-types.ts";
-import { isUsableFeedItem } from "./source-quality.ts";
+} from "./unified-updates-types";
+import { isUsableFeedItem } from "./source-quality";
 
 type LoadSourceHistoryOptions = {
   limit?: number;

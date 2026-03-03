@@ -6,9 +6,7 @@ alter table if exists source_snapshots
   add column if not exists freshness_target_minutes integer not null default 15,
   add column if not exists evidence_basis text not null default 'official_web' check (evidence_basis in ('api','official_web','rss','relay','x+official')),
   add column if not exists confirmation_state text not null default 'confirmed' check (confirmation_state in ('confirmed','unconfirmed_social'));
-
 drop view if exists latest_source_snapshots;
-
 create view latest_source_snapshots as
 select distinct on (source_id)
   source_id,
@@ -30,7 +28,6 @@ select distinct on (source_id)
   status_level
 from source_snapshots
 order by source_id, fetched_at desc;
-
 create table if not exists social_signals (
   id uuid primary key default gen_random_uuid(),
   provider text not null check (provider in ('x')),
@@ -46,5 +43,4 @@ create table if not exists social_signals (
   created_at timestamptz not null default now(),
   unique(provider, handle, post_id)
 );
-
 create index if not exists idx_social_signals_source_posted on social_signals(linked_source_id, posted_at desc);

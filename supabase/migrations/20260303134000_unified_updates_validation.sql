@@ -5,7 +5,6 @@ alter table if exists source_snapshots
   add column if not exists validation_reason text null,
   add column if not exists validation_model text null,
   add column if not exists validated_at timestamptz null;
-
 alter table if exists social_signals
   add column if not exists content_hash text,
   add column if not exists validation_state text not null default 'unvalidated' check (validation_state in ('validated','unvalidated','failed','skipped')),
@@ -13,12 +12,9 @@ alter table if exists social_signals
   add column if not exists validation_reason text null,
   add column if not exists validation_model text null,
   add column if not exists validated_at timestamptz null;
-
 create index if not exists idx_source_snapshots_source_event on source_snapshots(source_id, (coalesce(published_at, fetched_at)) desc);
 create index if not exists idx_social_signals_source_event on social_signals(linked_source_id, (coalesce(posted_at, fetched_at)) desc);
-
 drop view if exists unified_updates;
-
 create view unified_updates as
 with latest_source_meta as (
   select distinct on (source_id)

@@ -13,5 +13,4 @@ create table if not exists current_state_brief (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-
 create index if not exists idx_current_state_brief_refreshed on current_state_brief(refreshed_at desc);

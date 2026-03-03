@@ -76,6 +76,23 @@ function readJsonLdTextCandidates(html: string): string[] {
   return candidates;
 }
 
+/**
+ * Extract heading text from Jina reader markdown output.
+ * Jina returns `#### Article Title` style headings for news cards.
+ */
+function readJinaHeadings(text: string, limit = 12): string[] {
+  const out: string[] = [];
+  const pattern = /^#{1,4}\s+(.+)/gm;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) && out.length < limit) {
+    const cleaned = sanitizeSourceText(decodeEntities(match[1].trim()));
+    // Skip generic/nav headings
+    if (cleaned.length < 16 || /^(home|menu|search|skip|navigation|news center|about|contact)/i.test(cleaned)) continue;
+    out.push(cleaned);
+  }
+  return out;
+}
+
 function readTagTexts(html: string, tag: "h1" | "h2" | "h3" | "p", limit = 12): string[] {
   const out: string[] = [];
   const pattern = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "gi");
@@ -217,12 +234,16 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
   }
 
   if (source.extractor_id === "visit_dubai_articles") {
-    const title = readMeta(html, "og:title") ?? "Visit Dubai Articles";
+    // mediaoffice.ae is a SPA — Jina reader returns markdown with #### headings
+    const headings = readJinaHeadings(html, 8);
+    const latestHeadline = headings[0] ?? null;
+    const title = latestHeadline ?? readMeta(html, "og:title") ?? "Dubai Government Media Office";
     const summary = selectSummary(
       [
+        headings.slice(0, 5).join(" | ") || null,
         readMeta(html, "description"),
         ...readJsonLdTextCandidates(html),
-        ...readAnchorsWithKeywords(html, ["dubai", "airport", "travel", "visa", "event"], 6),
+        ...readAnchorsWithKeywords(html, ["dubai", "airport", "transport", "rta", "travel", "road", "metro", "flight"], 6),
       ],
       base.rawText,
     );
@@ -230,11 +251,16 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
   }
 
   if (source.extractor_id === "india_mea_press") {
-    const title = readMeta(html, "og:title") ?? "India MEA Press Releases";
+    // mea.gov.in is JS-rendered — Jina returns markdown; extract headings + relevant link texts
+    const headings = readJinaHeadings(html, 6);
+    const latestHeadline = headings.find((h) => h.length > 30) ?? null;
+    const title = latestHeadline ?? readMeta(html, "og:title") ?? "India MEA Press Releases";
     const summary = selectSummary(
       [
+        headings.slice(0, 5).join(" | ") || null,
         readMeta(html, "description"),
-        ...readAnchorsWithKeywords(html, ["press release", "advisory", "ministry", "external affairs", "travel"], 8),
+        ...readAnchorsWithKeywords(html, ["advisory", "gulf", "iran", "uae", "evacuation", "travel", "operation", "statement", "ministry"], 10),
+        ...readTagTexts(html, "h2", 4),
       ],
       base.rawText,
     );
@@ -242,11 +268,14 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
   }
 
   if (source.extractor_id === "india_boi_home") {
-    const title = readMeta(html, "og:title") ?? "India Bureau of Immigration";
+    // boi.gov.in — try headings + relevant links
+    const headings = readJinaHeadings(html, 4);
+    const title = headings[0] ?? readMeta(html, "og:title") ?? "India Bureau of Immigration";
     const summary = selectSummary(
       [
+        headings.slice(0, 4).join(" | ") || null,
         readMeta(html, "description"),
-        ...readAnchorsWithKeywords(html, ["notice", "immigration", "advisory", "entry", "exit", "visa", "circular"], 8),
+        ...readAnchorsWithKeywords(html, ["notice", "immigration", "advisory", "entry", "exit", "visa", "circular", "suspended", "restricted"], 10),
         ...readTagTexts(html, "h2", 4),
       ],
       base.rawText,

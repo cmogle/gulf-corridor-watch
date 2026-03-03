@@ -145,12 +145,20 @@ const BROWSERISH_HEADERS: Record<string, string> = {
   pragma: "no-cache",
 };
 
+// Sources whose primary URL is a JS SPA — Jina reader should be tried first
+const JINA_FIRST_SOURCES = new Set(["visit_dubai_news", "india_mea", "india_immigration_boi"]);
+
+function getPrimaryUrls(source: SourceDef): string[] {
+  if (JINA_FIRST_SOURCES.has(source.id)) {
+    // Jina reader first, direct HTML as fallback (Jina converts SPA content to readable markdown)
+    return [asJinaMirror(source.url), source.url];
+  }
+  return [source.url];
+}
+
 function getFallbackUrls(source: SourceDef): string[] {
   const map: Record<string, string[]> = {
     us_state_dept_travel: ["https://travel.state.gov/_res/rss/TAsTWs.xml"],
-    india_mea: ["https://mea.gov.in/press-releases.htm?51/Press_Releases="],
-    india_immigration_boi: ["https://boi.gov.in/boi"],
-    visit_dubai_news: ["https://www.mediaoffice.ae/en/news"],
     etihad_advisory: ["https://www.etihad.com/en-ae/help/travel-updates"],
   };
   return map[source.id] ?? [];
@@ -187,14 +195,83 @@ async function fetchTextWithFallback(urls: string[], mode: "rss" | "html"): Prom
   throw new Error(`All fetch attempts failed: ${String(lastError ?? "unknown")}`);
 }
 
+// Countries/regions relevant to the Gulf Corridor (India <-> UAE/Gulf) travel audience
+const GULF_CORRIDOR_KEYWORDS = [
+  "united arab emirates", "uae", "dubai", "abu dhabi",
+  "qatar", "bahrain", "kuwait", "oman", "saudi", "riyadh",
+  "iran", "iraq", "jordan", "israel", "gaza", "lebanon",
+  "india", "level 4", "level 3", "do not travel", "reconsider travel",
+  "ordered departure", "evacuation", "emergency",
+];
+
+type RssItem = {
+  title?: string;
+  description?: string;
+  pubDate?: string;
+  link?: string;
+};
+
+function pickBestRssItems(items: RssItem[], maxItems = 6): RssItem[] {
+  // Score each item by Gulf Corridor relevance
+  const scored = items.map((item) => {
+    const text = `${item.title ?? ""} ${item.description ?? ""}`.toLowerCase();
+    const score = GULF_CORRIDOR_KEYWORDS.reduce((acc, kw) => acc + (text.includes(kw) ? 1 : 0), 0);
+    return { item, score };
+  });
+  // Sort by score desc, then take top N (always include score>0 first)
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, maxItems).map((s) => s.item);
+}
+
 async function fetchRss(source: SourceDef): Promise<Snapshot> {
   const { text: xml, finalUrl, status } = await fetchTextWithFallback([source.url, ...getFallbackUrls(source)], "rss");
   const parsed = parser.parse(xml);
-  const item = parsed?.rss?.channel?.item?.[0] ?? parsed?.rss?.channel?.item;
 
-  const title = item?.title ?? source.name;
-  const summary = item?.description?.toString().slice(0, 1000) ?? "";
-  const published = item?.pubDate ? new Date(item.pubDate).toISOString() : null;
+  // Normalise items array — fast-xml-parser returns object when only 1 item
+  const rawItems: RssItem[] = (() => {
+    const ch = parsed?.rss?.channel ?? parsed?.feed;
+    const raw = ch?.item ?? ch?.entry;
+    if (!raw) return [];
+    return Array.isArray(raw) ? raw : [raw];
+  })();
+
+  const bestItems = pickBestRssItems(rawItems);
+  const primary = bestItems[0] ?? rawItems[0];
+
+  // Build rich title: for US State Dept, list all elevated Gulf advisories
+  let title: string = String(primary?.title ?? source.name);
+  let summary: string = "";
+
+  if (source.id === "us_state_dept_travel" && rawItems.length > 0) {
+    // Find all Level 3/4 Gulf/ME advisories and create an aggregate view
+    const elevated = rawItems.filter((item) => {
+      const t = (item.title ?? "").toLowerCase();
+      return (t.includes("level 3") || t.includes("level 4") || t.includes("do not travel") || t.includes("reconsider")) &&
+        GULF_CORRIDOR_KEYWORDS.some((k) => t.includes(k));
+    });
+    if (elevated.length > 0) {
+      const countries = elevated.map((item) => {
+        const t = item.title ?? "";
+        return t.replace(/\s*-\s*Level\s*\d+.*$/i, "").trim();
+      });
+      title = `US Travel Advisories: ${countries.slice(0, 4).join(", ")}${countries.length > 4 ? ` +${countries.length - 4} more` : ""} elevated`;
+      summary = elevated.map((item) => {
+        const desc = (item.description ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
+        return `${item.title}: ${desc}`;
+      }).join(" | ");
+    } else {
+      summary = bestItems.map((item) => `${item.title ?? ""}`).join(" | ");
+    }
+  } else {
+    summary = bestItems
+      .map((item) => `${item.title ?? ""}${item.description ? ": " + (item.description ?? "").toString().replace(/<[^>]+>/g, " ").trim().slice(0, 120) : ""}`)
+      .join(" | ")
+      .slice(0, 1000);
+    if (!summary) summary = (primary?.description ?? "").toString().slice(0, 1000);
+  }
+
+  const published = primary?.pubDate ? new Date(primary.pubDate).toISOString() : null;
+  const combinedText = `${title} ${summary}`;
 
   return {
     source_id: source.id,
@@ -203,10 +280,10 @@ async function fetchRss(source: SourceDef): Promise<Snapshot> {
     category: source.category,
     fetched_at: new Date().toISOString(),
     published_at: published,
-    title: String(title),
+    title,
     summary,
     raw_text: xml.slice(0, 10000),
-    status_level: inferLevel(`${title} ${summary}`),
+    status_level: inferLevel(combinedText),
     ingest_method: "rss",
     reliability: inferReliability(xml, status),
     block_reason: null,
@@ -229,7 +306,7 @@ async function fetchHtml(source: SourceDef): Promise<Snapshot> {
   let method: Snapshot["ingest_method"] = "official_web";
   let httpStatus = 200;
   try {
-    const direct = await fetchTextWithFallback([source.url, ...getFallbackUrls(source)], "html");
+    const direct = await fetchTextWithFallback([...getPrimaryUrls(source), ...getFallbackUrls(source)], "html");
     html = direct.text;
     sourceUrl = direct.finalUrl;
     httpStatus = direct.status;

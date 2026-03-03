@@ -6,6 +6,7 @@ import { OmnipresentChat } from "@/app/components/omnipresent-chat";
 import { MyTrackingPanel } from "@/app/components/my-tracking-panel";
 import { isUsableSnapshot } from "@/lib/source-quality";
 import { LiveUpdatesTicker } from "@/app/components/live-updates-ticker";
+import { XEmbed } from "@/app/components/x-embed";
 import { loadUnifiedFeed } from "@/lib/unified-updates";
 
 export const dynamic = "force-dynamic";
@@ -320,12 +321,7 @@ export default async function Home({ searchParams }: HomeProps) {
                       </details>
                     ) : null}
                     {signal.url ? (
-                      <iframe
-                        title={`x-${signal.post_id}`}
-                        className="h-[220px] w-full rounded-md border border-zinc-200"
-                        loading="lazy"
-                        src={`https://twitframe.com/show?url=${encodeURIComponent(signal.url)}`}
-                      />
+                      <XEmbed url={signal.url} postId={signal.post_id ?? "post"} />
                     ) : null}
                     <div className="flex items-center justify-between text-[11px] text-zinc-600">
                       <span>Confidence: {(signal.confidence * 100).toFixed(0)}%</span>

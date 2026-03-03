@@ -2,6 +2,7 @@ import { XMLParser } from "fast-xml-parser";
 import { OFFICIAL_SOURCES, SourceDef } from "./sources";
 import { getSupabaseAdmin } from "./supabase";
 import { ingestAirports } from "./flightradar";
+import { ingestAirportsOpenSky } from "./opensky";
 import { fetchViaChromeRelay } from "./chrome-relay";
 import { pollOfficialXSignals } from "./x-signals";
 import { extractHtmlSnapshot } from "./source-extractors";
@@ -412,14 +413,36 @@ export async function runIngestion(opts?: { scope?: IngestScope }) {
   const { error } = await supabase.from("source_snapshots").insert(snapshots);
   if (error) throw error;
 
-  if (process.env.FLIGHTRADAR_KEY && (scope === "airline" || scope === "full")) {
+  if (scope === "airline" || scope === "full") {
     try {
-      const flights = await ingestAirports([...AIRPORTS]);
+      let flights: Awaited<ReturnType<typeof ingestAirports>> = [];
+      let usedSource = "flightradar";
+      if (process.env.FLIGHTRADAR_KEY) {
+        try {
+          flights = await ingestAirports([...AIRPORTS]);
+        } catch (fr24err) {
+          const msg = String(fr24err);
+          if (/403|401|Forbidden|Unauthorized/i.test(msg)) {
+            // FR24 key blocked/unsubscribed — fall back to OpenSky
+            flights = await ingestAirportsOpenSky();
+            usedSource = "opensky";
+          } else {
+            throw fr24err;
+          }
+        }
+      } else {
+        // No FR24 key at all — go straight to OpenSky
+        flights = await ingestAirportsOpenSky();
+        usedSource = "opensky";
+      }
       if (flights.length > 0) {
         const { error: flightInsertError } = await supabase.from("flight_observations").insert(flights);
         if (flightInsertError) throw flightInsertError;
       }
       flightCount = flights.length;
+      if (usedSource === "opensky") {
+        flightError = `OpenSky fallback used (FR24 unavailable): ${flights.length} aircraft observed in UAE/Gulf airspace`;
+      }
     } catch (error) {
       flightError = String(error);
     }

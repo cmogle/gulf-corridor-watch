@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { parseFlightIntent } from "@/lib/flight-query";
-import { addTrackedFlight, addTrackedRoute, loadTracking } from "@/lib/tracking-local";
+import { addTrackedFlight, addTrackedRoute } from "@/lib/tracking-local";
 
 type FlightResult = {
   ok: boolean;

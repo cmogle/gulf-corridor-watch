@@ -1,4 +1,3 @@
-import { OFFICIAL_SOURCES } from "@/lib/sources";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { isUsableSnapshot } from "@/lib/source-quality";
 import { loadUnifiedFeed } from "@/lib/unified-updates";

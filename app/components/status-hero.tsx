@@ -57,7 +57,6 @@ function relativeTime(iso: string | null): string {
 
 export function StatusHero({
   posture,
-  briefingSummary,
   flightTotal,
   flightDelayed,
   flightCancelled,

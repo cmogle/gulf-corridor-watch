@@ -78,17 +78,37 @@ function readJsonLdTextCandidates(html: string): string[] {
 
 /**
  * Extract heading text from Jina reader markdown output.
- * Jina returns `#### Article Title` style headings for news cards.
+ * Handles both ATX headings (`#### Title`) and setext headings (underlined with --- or ===).
+ * Used for SPA sites where Jina converts rendered DOM → readable markdown.
  */
 function readJinaHeadings(text: string, limit = 12): string[] {
+  const SKIP = /^(home|menu|search|skip|navigation|news center|about|contact|sitemap|feedback|login|language)/i;
   const out: string[] = [];
-  const pattern = /^#{1,4}\s+(.+)/gm;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(text)) && out.length < limit) {
-    const cleaned = sanitizeSourceText(decodeEntities(match[1].trim()));
-    // Skip generic/nav headings
-    if (cleaned.length < 16 || /^(home|menu|search|skip|navigation|news center|about|contact)/i.test(cleaned)) continue;
-    out.push(cleaned);
+  const lines = text.split("\n");
+
+  for (let i = 0; i < lines.length && out.length < limit; i++) {
+    const line = lines[i];
+    const next = lines[i + 1] ?? "";
+
+    // ATX-style: `### Heading Text`
+    const atxMatch = line.match(/^#{1,4}\s+(.+)/);
+    if (atxMatch) {
+      const cleaned = sanitizeSourceText(decodeEntities(atxMatch[1].trim()));
+      if (cleaned.length >= 16 && !SKIP.test(cleaned)) {
+        out.push(cleaned);
+        continue;
+      }
+    }
+
+    // Setext-style: heading followed by `---` or `===` underline (MOFA uses this)
+    if (/^[-=]{4,}\s*$/.test(next) && line.trim().length >= 20) {
+      const cleaned = sanitizeSourceText(decodeEntities(line.trim()));
+      if (!SKIP.test(cleaned)) {
+        out.push(cleaned);
+        i++; // skip the underline line
+        continue;
+      }
+    }
   }
   return out;
 }
@@ -220,13 +240,20 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
   }
 
   if (source.extractor_id === "mofa_news") {
-    const title = readMeta(html, "og:title") ?? "UAE Ministry of Foreign Affairs - News";
+    // MOFA renders via SPA — Jina reader returns setext-style headings (underlined with ---)
+    // Most recent headlines contain breaking news (e.g. ambassador summons, embassy closures)
+    const headings = readJinaHeadings(html, 8);
+    const latestBreaking = headings.find((h) =>
+      /summon|expel|protest|attack|missile|clos|ambassador|condemn|solidarity|evacuat|statement|urgent|crisis/i.test(h)
+    ) ?? headings[0] ?? null;
+    const title = latestBreaking ?? readMeta(html, "og:title") ?? "UAE Ministry of Foreign Affairs";
     const titleAttrs = Array.from(html.matchAll(/title=["']([^"']{24,220})["']/gi)).map((m) => sanitizeSourceText(decodeEntities(m[1])));
     const summary = selectSummary(
       [
+        headings.slice(0, 5).join(" | ") || null,
         readMeta(html, "description"),
-        ...titleAttrs,
-        ...readAnchorsWithKeywords(html, ["uae", "minister", "foreign", "embassy", "statement", "news"], 6),
+        ...titleAttrs.slice(0, 4),
+        ...readAnchorsWithKeywords(html, ["uae", "minister", "foreign", "embassy", "statement", "iran", "attack", "condemn", "solidarity"], 6),
       ],
       base.rawText,
     );

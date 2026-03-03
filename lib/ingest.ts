@@ -146,7 +146,7 @@ const BROWSERISH_HEADERS: Record<string, string> = {
 };
 
 // Sources whose primary URL is a JS SPA — Jina reader should be tried first
-const JINA_FIRST_SOURCES = new Set(["visit_dubai_news", "india_mea", "india_immigration_boi"]);
+const JINA_FIRST_SOURCES = new Set(["visit_dubai_news", "india_mea", "india_immigration_boi", "uae_mofa"]);
 
 function getPrimaryUrls(source: SourceDef): string[] {
   if (JINA_FIRST_SOURCES.has(source.id)) {

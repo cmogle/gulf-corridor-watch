@@ -67,6 +67,7 @@ export type FeedItemLike = {
 export function isUsableFeedItem(item: FeedItemLike): boolean {
   if (item.update_type === "x") return true;
   if (item.reliability === "degraded" || item.reliability === "blocked") return false;
+  if (!item.summary.trim()) return false;
   const merged = `${item.headline} ${item.summary}`;
   return !isUnusableSourceText(merged);
 }

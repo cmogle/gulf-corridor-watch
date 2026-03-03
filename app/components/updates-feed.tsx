@@ -160,11 +160,9 @@ export function UpdatesFeed({ initialItems }: { initialItems: UnifiedUpdateItem[
                     }`}>
                       {item.update_type === "snapshot" ? "Official" : "Official X"}
                     </span>
-                    {item.validation_state === "validated" ? (
+                    {item.validation_state === "validated" && (
                       <span className="rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-800">Verified</span>
-                    ) : item.confirmation_state === "confirmed" ? (
-                      <span className="rounded-full px-2 py-0.5 bg-sky-100 text-sky-800">Official</span>
-                    ) : null}
+                    )}
                     <a
                       href={item.original_url}
                       target="_blank"

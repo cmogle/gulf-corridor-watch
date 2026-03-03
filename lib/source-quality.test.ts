@@ -29,3 +29,8 @@ test("isUsableFeedItem accepts reliable snapshot", () => {
 test("isUsableFeedItem always accepts x posts regardless of reliability", () => {
   assert.equal(isUsableFeedItem({ headline: "@rta_dubai on X", summary: "Service update", reliability: "degraded", update_type: "x" }), true);
 });
+
+test("isUsableFeedItem rejects snapshot with empty summary", () => {
+  assert.equal(isUsableFeedItem({ headline: "US Department of Defense Releases", summary: "", reliability: "reliable", update_type: "snapshot" }), false);
+  assert.equal(isUsableFeedItem({ headline: "US Department of Defense Releases", summary: "   ", reliability: "reliable", update_type: "snapshot" }), false);
+});

@@ -8,6 +8,7 @@ import { FlightPulse } from "@/app/components/flight-pulse";
 import { UpdatesFeed } from "@/app/components/updates-feed";
 import { MyTrackingPanel } from "@/app/components/my-tracking-panel";
 import { ResourcesPanel } from "@/app/components/resources-panel";
+import { AirspacePulseAtlas } from "@/app/components/pulse-atlas";
 import { SourceHealth } from "@/app/components/source-health";
 
 export const dynamic = "force-dynamic";
@@ -191,6 +192,8 @@ export default async function Home() {
           sourceCount={currentBrief.coverage.sources_included.length}
         />
       )}
+
+      <AirspacePulseAtlas />
 
       <FlightPulse byAirport={pulse.byAirport} topRoutes={pulse.topRoutes} />
 

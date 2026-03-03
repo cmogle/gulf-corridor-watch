@@ -62,3 +62,24 @@
 .animate-fade-in-up {
   animation: fade-in-up 0.3s ease-out forwards;
 }
+
+/* Pulse Atlas — node pulse ring */
+@keyframes atlas-node-pulse {
+  0%, 100% { opacity: 0.25; transform: scale(1); }
+  50% { opacity: 0.08; transform: scale(1.15); }
+}
+
+.animate-atlas-node-pulse {
+  animation: atlas-node-pulse 3s ease-in-out infinite;
+  transform-origin: center;
+}
+
+/* Pulse Atlas — flowing ribbon dash */
+@keyframes atlas-ribbon-flow {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}
+
+.animate-atlas-ribbon-flow {
+  animation: atlas-ribbon-flow 1.8s linear infinite;
+}

@@ -22,6 +22,7 @@ function clampLimit(limit?: number): number {
   return Math.max(1, Math.min(200, Math.round(limit)));
 }
 
+/** Keeps first occurrence per source+summary key. Expects newest-first ordering. */
 export function deduplicateFeedItems(items: UnifiedUpdateItem[]): UnifiedUpdateItem[] {
   const seen = new Set<string>();
   const out: UnifiedUpdateItem[] = [];
@@ -49,7 +50,7 @@ export function filterAndDeduplicateFeed(items: UnifiedUpdateItem[]): UnifiedUpd
 export async function loadUnifiedFeed(limit?: number): Promise<UnifiedUpdateItem[]> {
   const pageSize = clampLimit(limit);
   const supabase = getSupabaseAdmin();
-  const fetchSize = Math.max(pageSize * 4, pageSize);
+  const fetchSize = pageSize * 4;
 
   const { data, error } = await supabase.from("unified_updates").select(SELECT_COLUMNS).order("event_at", { ascending: false }).limit(fetchSize);
   if (error) throw error;

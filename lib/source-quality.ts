@@ -56,3 +56,17 @@ export function isUsableSnapshot(snapshot: SnapshotLike): boolean {
   const merged = `${snapshot.title} ${snapshot.summary}`;
   return !isUnusableSourceText(merged);
 }
+
+export type FeedItemLike = {
+  headline: string;
+  summary: string;
+  reliability: "reliable" | "degraded" | "blocked";
+  update_type: "snapshot" | "x";
+};
+
+export function isUsableFeedItem(item: FeedItemLike): boolean {
+  if (item.update_type === "x") return true;
+  if (item.reliability === "degraded" || item.reliability === "blocked") return false;
+  const merged = `${item.headline} ${item.summary}`;
+  return !isUnusableSourceText(merged);
+}

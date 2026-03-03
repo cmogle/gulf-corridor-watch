@@ -45,6 +45,22 @@ export function stripJinaPrefix(text: string): string {
   return stripped;
 }
 
+/**
+ * Convert markdown syntax to plain text.
+ * Called globally for all Jina-sourced content to prevent raw markdown
+ * (links, images, headings, bullets, separators) from leaking into summaries.
+ */
+export function stripMarkdown(text: string): string {
+  return text
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")            // images: ![alt](url) → removed
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")          // links: [text](url) → text
+    .replace(/^[=\-]{4,}\s*$/gm, "")                  // setext underlines: ==== / ----
+    .replace(/^#{1,6}\s+/gm, "")                      // ATX heading markers: ### → removed
+    .replace(/^\s*[*\-+]\s+/gm, "")                   // list bullets: * item → item
+    .replace(/\n{3,}/g, "\n\n")                        // collapse excess newlines
+    .trim();
+}
+
 function stripHtml(input: string): string {
   const stripped = input
     .replace(/<script[\s\S]*?<\/script>/gi, " ")

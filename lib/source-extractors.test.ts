@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { stripJinaPrefix } from "./source-extractors.ts";
+import { stripJinaPrefix, stripMarkdown } from "./source-extractors.ts";
 
 // Jina responses have blank lines between header fields
 const JINA_RESPONSE = `Title: Oman Air
@@ -70,4 +70,48 @@ Page Not Found ===============`;
   assert.ok(!result.includes("Warning:"));
   assert.ok(!result.includes("Markdown Content:"));
   assert.ok(result.includes("Page Not Found"));
+});
+
+test("stripMarkdown removes image syntax", () => {
+  assert.equal(stripMarkdown("Hello ![alt text](http://example.com/img.png) world"), "Hello  world");
+});
+
+test("stripMarkdown converts links to plain text", () => {
+  assert.equal(stripMarkdown("Visit [Google](https://google.com) today"), "Visit Google today");
+});
+
+test("stripMarkdown removes setext underlines", () => {
+  const input = "Heading\n========\nContent";
+  assert.ok(!stripMarkdown(input).includes("========"));
+  assert.ok(stripMarkdown(input).includes("Heading"));
+  assert.ok(stripMarkdown(input).includes("Content"));
+});
+
+test("stripMarkdown strips ATX heading markers", () => {
+  assert.equal(stripMarkdown("### Travel Updates"), "Travel Updates");
+});
+
+test("stripMarkdown strips list bullets", () => {
+  const input = "* First item\n- Second item\n+ Third item";
+  const result = stripMarkdown(input);
+  assert.ok(result.includes("First item"));
+  assert.ok(result.includes("Second item"));
+  assert.ok(result.includes("Third item"));
+  assert.ok(!result.includes("* "));
+  assert.ok(!result.includes("- Second"));
+  assert.ok(!result.includes("+ "));
+});
+
+test("stripMarkdown passes plain text unchanged", () => {
+  const plain = "This is normal text with no markdown.";
+  assert.equal(stripMarkdown(plain), plain);
+});
+
+test("stripMarkdown handles mixed markdown content", () => {
+  const input = "# Welcome\n\n![logo](img.png)\n\nVisit [our site](http://example.com) for * updates\n- Item one\n- Item two";
+  const result = stripMarkdown(input);
+  assert.ok(!result.includes("!["));
+  assert.ok(!result.includes("]("));
+  assert.ok(result.includes("our site"));
+  assert.ok(result.includes("Item one"));
 });

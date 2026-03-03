@@ -13,7 +13,10 @@ Fast MVP dashboard for official-source travel/disruption monitoring + GPT-4o-min
 - Live Flight Pulse for DXB/AUH backed by Flightradar API polling
 - Flight query endpoint: `/api/flights/query` (flight number + route lookups)
 - Official X signal ingest (supplementary early warning) + embedded latest updates per official handle
+- GPT-generated Current State Briefing (single top-of-page paragraph) refreshed every 5 minutes
 - Signals summary endpoint: `/api/signals/summary`
+- Briefing read endpoint: `/api/brief/current`
+- Briefing refresh endpoint: `/api/brief/refresh?key=...`
 - Unified updates feed endpoint: `/api/updates/feed`
 - Provider updates history endpoint: `/api/updates/source/:sourceId`
 - Arabic X posts are translated to English at ingest-time while preserving original text
@@ -43,6 +46,7 @@ SUPABASE_URL=...
 SUPABASE_SERVICE_ROLE_KEY=...
 OPENAI_API_KEY=...
 INGEST_SECRET=...
+BRIEF_SECRET=...
 FLIGHTRADAR_KEY=...
 # optional override (defaults to https://fr24api.flightradar24.com/api)
 FLIGHTRADAR_BASE_URL=...
@@ -60,6 +64,9 @@ GPT_UPDATE_VALIDATION_ENABLED=true
 GPT_UPDATE_VALIDATION_MODEL=gpt-4o-mini
 GPT_UPDATE_VALIDATION_TIMEOUT_MS=8000
 GPT_UPDATE_VALIDATION_MAX_PER_INGEST=20
+# optional model/timeout override for top banner briefing generation
+CURRENT_STATE_BRIEF_MODEL=gpt-4o-mini
+CURRENT_STATE_BRIEF_TIMEOUT_MS=8000
 ```
 
 4) Start locally
@@ -100,6 +107,14 @@ npm run dev
 - `GET /api/signals/summary?lang=en&include_original=true`
 - `lang` defaults to `en` and uses translated English when available.
 - `include_original=true` includes `text_original` for audit/verification UI.
+
+## Current state briefing APIs
+- `GET /api/brief/current`
+  - returns the latest persisted paragraph (or transient fallback when first-run data is not persisted yet)
+  - includes freshness, confidence, flight summary, and coverage metadata
+- `GET /api/brief/refresh?key=<INGEST_SECRET or BRIEF_SECRET>`
+  - internal cron-triggered rebuild of the briefing
+  - hash-based regeneration skips LLM calls when source inputs are unchanged
 
 ## Unified updates APIs
 - `GET /api/updates/feed?limit=80`

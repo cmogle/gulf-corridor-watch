@@ -116,6 +116,24 @@ create index if not exists idx_social_signals_source_posted on social_signals(li
 create index if not exists idx_source_snapshots_source_event on source_snapshots(source_id, (coalesce(published_at, fetched_at)) desc);
 create index if not exists idx_social_signals_source_event on social_signals(linked_source_id, (coalesce(posted_at, fetched_at)) desc);
 
+create table if not exists current_state_brief (
+  key text primary key,
+  paragraph text not null,
+  input_hash text not null,
+  generated_at timestamptz not null,
+  refreshed_at timestamptz not null,
+  model text null,
+  freshness_state text not null check (freshness_state in ('fresh','mixed','stale')),
+  confidence text not null check (confidence in ('high','medium','low')),
+  flight_summary jsonb not null default '{}'::jsonb,
+  coverage jsonb not null default '{}'::jsonb,
+  sources_used jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_current_state_brief_refreshed on current_state_brief(refreshed_at desc);
+
 drop view if exists unified_updates;
 
 create view unified_updates as

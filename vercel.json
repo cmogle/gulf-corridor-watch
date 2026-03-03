@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/brief/refresh?key=@ingest_secret",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/ingest?key=@ingest_secret&scope=airline",
       "schedule": "*/5 * * * *"
     },

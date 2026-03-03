@@ -6,7 +6,7 @@ import { addTrackedFlight, addTrackedRoute, loadTracking } from "@/lib/tracking-
 type QueryResponse = {
   ok: boolean;
   mode?: "structured_only" | "explain";
-  source?: "cache" | "live" | "none";
+  source?: "cache" | "live" | "none" | "advisory";
   error?: string;
   explanation?: string | null;
   summary?: {
@@ -171,15 +171,32 @@ export function FlightSearchWidget({ suggestedPrompts = [], latestFetch = null }
         </div>
       </div>
 
-      {data?.ok && data.insight && (
-        <article className="rounded-lg border border-sky-200 bg-sky-50/70 p-3 text-sm">
-          <p className="font-semibold">{data.insight.headline}</p>
-          <p className="text-zinc-700">{data.insight.summary}</p>
-          <p className="mt-1 text-xs text-zinc-600">
-            Confidence: {data.insight.confidence.toUpperCase()} | Horizon: {data.insight.horizon_hours}h | Score: {data.insight.score ?? "n/a"}
-          </p>
-        </article>
-      )}
+      {data?.ok && data.insight && (() => {
+        const score = data.insight.score;
+        const scoreColor = score == null ? "bg-zinc-100 text-zinc-700" :
+          score >= 70 ? "bg-emerald-100 text-emerald-800" :
+          score >= 45 ? "bg-amber-100 text-amber-800" :
+          "bg-red-100 text-red-800";
+        const borderColor = score == null ? "border-sky-200 bg-sky-50/70" :
+          score >= 70 ? "border-emerald-200 bg-emerald-50/70" :
+          score >= 45 ? "border-amber-200 bg-amber-50/70" :
+          "border-red-200 bg-red-50/70";
+        return (
+          <article className={`rounded-lg border ${borderColor} p-3 text-sm`}>
+            <div className="flex items-start justify-between gap-3">
+              <p className="font-semibold leading-tight">{data.insight.headline}</p>
+              {score != null && (
+                <span className={`shrink-0 rounded-full px-2 py-1 text-sm font-bold ${scoreColor}`}>{score}/100</span>
+              )}
+            </div>
+            <p className="mt-1 text-zinc-700">{data.insight.summary}</p>
+            <p className="mt-1 text-xs text-zinc-500">
+              Confidence: {data.insight.confidence.toUpperCase()} · Horizon: {data.insight.horizon_hours}h
+              {data.source === "advisory" ? " · Advisory-based (no direct route data)" : ""}
+            </p>
+          </article>
+        );
+      })()}
 
       {data?.ok && data.summary && (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">

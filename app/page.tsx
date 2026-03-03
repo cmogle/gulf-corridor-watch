@@ -3,6 +3,10 @@ import { INDIA_TRANSIT_VISA_LINKS, OFFICIAL_DIRECTORY } from "@/lib/resource-dir
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { FlightSearchWidget } from "@/app/components/flight-search-widget";
 import { OmnipresentChat } from "@/app/components/omnipresent-chat";
+import { MyTrackingPanel } from "@/app/components/my-tracking-panel";
+import { isUsableSnapshot } from "@/lib/source-quality";
+import { LiveUpdatesTicker } from "@/app/components/live-updates-ticker";
+import { loadUnifiedFeed } from "@/lib/unified-updates";
 
 export const dynamic = "force-dynamic";
 type HomeProps = {
@@ -210,42 +214,24 @@ async function loadFlightPulse(): Promise<FlightPulse> {
   }
 }
 
-function badge(level: Row["status_level"]) {
-  const map = {
-    normal: "bg-emerald-100 text-emerald-800",
-    advisory: "bg-amber-100 text-amber-800",
-    disrupted: "bg-red-100 text-red-800",
-    unknown: "bg-zinc-200 text-zinc-700",
-  } as const;
-  return <span className={`rounded-full px-2 py-1 text-xs font-medium ${map[level]}`}>{level.toUpperCase()}</span>;
-}
-
-function reliabilityBadge(level: Row["reliability"]) {
-  const map = {
-    reliable: "bg-emerald-100 text-emerald-800",
-    degraded: "bg-amber-100 text-amber-800",
-    blocked: "bg-red-100 text-red-800",
-  } as const;
-  const label = level === "reliable" ? "Reliable" : level === "degraded" ? "Degraded" : "Blocked";
-  return <span className={`rounded-full px-2 py-1 text-[11px] font-medium ${map[level]}`}>{label}</span>;
-}
-
-function freshnessLabel(fetchedAt: string, targetMins: number) {
-  const ageMs = Date.now() - new Date(fetchedAt).getTime();
-  const ageMins = ageMs / 60000;
-  if (ageMins <= targetMins) return "fresh";
-  if (ageMins <= targetMins * 3) return "stale";
-  return "degraded";
+function suppressionReason(row: Row) {
+  if (row.reliability === "blocked") return "blocked/challenge page";
+  if (/fetch error/i.test(row.title)) return "fetch failed";
+  if (!row.summary?.trim()) return "empty summary";
+  return "low-signal source content";
 }
 
 export default async function Home({ searchParams }: HomeProps) {
   const params = (await searchParams) ?? {};
   const initialQuery = params.q?.trim() ?? "";
   const rows = await loadRows();
+  const usableRows = rows.filter((row) => isUsableSnapshot({ title: row.title, summary: row.summary, reliability: row.reliability }));
+  const suppressedRows = rows.filter((row) => !isUsableSnapshot({ title: row.title, summary: row.summary, reliability: row.reliability }));
   const pulse = await loadFlightPulse();
   const socialSignals = await loadSocialSignals();
-  const advisories = rows.filter((r) => r.status_level === "advisory" || r.status_level === "disrupted").length;
-  const unknown = rows.filter((r) => r.status_level === "unknown").length;
+  const initialUpdates = await loadUnifiedFeed(80).catch(() => []);
+  const advisories = usableRows.filter((r) => r.status_level === "advisory" || r.status_level === "disrupted").length;
+  const unknown = usableRows.filter((r) => r.status_level === "unknown").length;
 
   return (
     <main className="mx-auto max-w-[1400px] p-4 md:p-6">
@@ -359,7 +345,8 @@ export default async function Home({ searchParams }: HomeProps) {
           <div className="grid gap-3 sm:grid-cols-3">
             <article className="rounded-xl border border-zinc-300 bg-white/80 p-3">
               <p className="text-xs uppercase tracking-wide text-zinc-600">Official Sources</p>
-              <p className="text-2xl font-semibold">{rows.length}</p>
+              <p className="text-2xl font-semibold">{usableRows.length}</p>
+              <p className="text-[11px] text-zinc-500">{suppressedRows.length} hidden as unusable</p>
             </article>
             <article className="rounded-xl border border-zinc-300 bg-white/80 p-3">
               <p className="text-xs uppercase tracking-wide text-zinc-600">Advisory/Disrupted</p>
@@ -404,6 +391,8 @@ export default async function Home({ searchParams }: HomeProps) {
           </div>
         </div>
           </section>
+
+          <MyTrackingPanel />
 
           <details className="group rounded-2xl border border-zinc-300 bg-white/80 p-4">
         <summary className="cursor-pointer list-none text-lg font-semibold">Quick Links & Contacts</summary>
@@ -450,36 +439,31 @@ export default async function Home({ searchParams }: HomeProps) {
         </div>
           </details>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {rows.map((r) => (
-          <article key={r.source_id} className="rounded-2xl border border-zinc-300 bg-white/80 p-4 space-y-3">
-            <div className="flex items-start justify-between gap-2">
-              <h2 className="font-medium leading-tight">{r.source_name}</h2>
-              {badge(r.status_level)}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-xs text-zinc-500">{r.category.toUpperCase()}</p>
-              {reliabilityBadge(r.reliability)}
-              <span className="rounded-full bg-zinc-100 px-2 py-1 text-[11px] text-zinc-700">{freshnessLabel(r.fetched_at, r.freshness_target_minutes)}</span>
-            </div>
-            <p className="text-sm font-medium">{r.title}</p>
-            <p className="text-sm text-zinc-700 line-clamp-4">{r.summary}</p>
-            <div className="text-xs text-zinc-500 space-y-1">
-              <p>Fetched: {new Date(r.fetched_at).toLocaleString()}</p>
-              <p>Published: {r.published_at ? new Date(r.published_at).toLocaleString() : "n/a"}</p>
-              <p>Evidence: {r.evidence_basis}</p>
-              <p>Confirmation: {r.confirmation_state}</p>
-              <p>Connector: {r.ingest_method}</p>
-              {r.block_reason ? <p className="text-red-700">Block reason: {r.block_reason}</p> : null}
-            </div>
-            <a href={r.source_url} target="_blank" className="text-sm underline">Official source ↗</a>
-          </article>
-        ))}
-          </div>
+          <LiveUpdatesTicker initialItems={initialUpdates} />
 
-          {rows.length === 0 && (
+          {suppressedRows.length > 0 && (
+            <section className="rounded-xl border border-amber-300 bg-amber-50/70 p-4">
+              <p className="text-sm font-medium text-amber-900">Temporarily unavailable sources</p>
+              <p className="mt-1 text-xs text-amber-800">These sources returned blocked/error/low-signal content and were hidden from advisory cards.</p>
+              <ul className="mt-3 grid gap-2 md:grid-cols-2">
+                {suppressedRows.map((row) => (
+                  <li key={`suppressed-${row.source_id}`} className="rounded-lg border border-amber-200 bg-white/80 p-2 text-xs text-zinc-700">
+                    <p className="font-medium">{row.source_name}</p>
+                    <p className="text-zinc-600">{suppressionReason(row)}</p>
+                    <a href={row.source_url} target="_blank" className="underline">
+                      Open official source ↗
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {usableRows.length === 0 && (
             <div className="rounded-xl border border-dashed p-6 text-sm text-zinc-600">
-              No data yet. Configure Supabase env vars, run SQL in <code>supabase/schema.sql</code>, then hit <code>/api/ingest?key=YOUR_SECRET</code>.
+              {rows.length === 0
+                ? <>No data yet. Configure Supabase env vars, run SQL in <code>supabase/schema.sql</code>, then hit <code>/api/ingest?key=YOUR_SECRET</code>.</>
+                : "No usable source summaries are currently available. Use the official links above while source ingestion is degraded."}
             </div>
           )}
         </div>

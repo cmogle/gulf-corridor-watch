@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { flightsToContextRows, parseFlightIntent, runFlightQuery } from "@/lib/flight-query";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { isUsableSnapshot } from "@/lib/source-quality";
 
 type SocialContextRow = {
   linked_source_id: string;
@@ -55,7 +56,7 @@ ${context || "No matching flights found."}`,
 
     const { data, error } = await supabase
       .from("latest_source_snapshots")
-      .select("source_id, source_name, source_url, fetched_at, published_at, title, summary, status_level")
+      .select("source_id, source_name, source_url, fetched_at, published_at, title, summary, status_level, reliability")
       .limit(20);
 
     if (error) throw error;
@@ -72,7 +73,15 @@ ${context || "No matching flights found."}`,
       if (!latestSocialBySource.has(row.linked_source_id)) latestSocialBySource.set(row.linked_source_id, row);
     }
 
-    const context = (data ?? [])
+    const usableSnapshots = (data ?? []).filter((d) =>
+      isUsableSnapshot({
+        title: d.title ?? "",
+        summary: d.summary ?? "",
+        reliability: d.reliability === "blocked" || d.reliability === "degraded" || d.reliability === "reliable" ? d.reliability : "degraded",
+      }),
+    );
+
+    const context = usableSnapshots
       .map(
         (d) =>
           `[${d.source_name}] status=${d.status_level} fetched=${d.fetched_at} published=${d.published_at ?? "n/a"}\nTitle: ${d.title}\nSummary: ${d.summary}\nURL: ${d.source_url}`

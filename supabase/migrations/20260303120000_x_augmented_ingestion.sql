@@ -7,7 +7,9 @@ alter table if exists source_snapshots
   add column if not exists evidence_basis text not null default 'official_web' check (evidence_basis in ('api','official_web','rss','relay','x+official')),
   add column if not exists confirmation_state text not null default 'confirmed' check (confirmation_state in ('confirmed','unconfirmed_social'));
 
-create or replace view latest_source_snapshots as
+drop view if exists latest_source_snapshots;
+
+create view latest_source_snapshots as
 select distinct on (source_id)
   source_id,
   source_name,

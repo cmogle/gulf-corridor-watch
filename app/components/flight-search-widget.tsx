@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { addTrackedFlight, addTrackedRoute, loadTracking } from "@/lib/tracking-local";
 
 type QueryResponse = {
   ok: boolean;
@@ -32,6 +33,12 @@ type QueryResponse = {
     delay_minutes: number | null;
     fetched_at: string;
   }>;
+  normalized_intent?: {
+    type: "flight_number" | "route" | "unknown";
+    flight_number?: string;
+    origin_iata?: string | null;
+    destination_iata?: string | null;
+  };
 };
 
 const SUGGESTED_PROMPTS = [
@@ -46,6 +53,7 @@ export function FlightSearchWidget() {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<QueryResponse | null>(null);
   const [allowLive, setAllowLive] = useState(false);
+  const [trackNotice, setTrackNotice] = useState<string | null>(null);
 
   async function submit(mode: "structured_only" | "explain") {
     const trimmed = query.trim();
@@ -61,6 +69,40 @@ export function FlightSearchWidget() {
     const json = (await res.json()) as QueryResponse;
     setData(json);
     setLoading(false);
+  }
+
+  const trackIntent = useMemo(() => {
+    if (!data?.ok || !data.normalized_intent) return null;
+    if (data.normalized_intent.type === "flight_number" && data.normalized_intent.flight_number) {
+      return { kind: "flight" as const, flight_number: data.normalized_intent.flight_number };
+    }
+    if (
+      data.normalized_intent.type === "route" &&
+      data.normalized_intent.origin_iata &&
+      data.normalized_intent.destination_iata
+    ) {
+      return {
+        kind: "route" as const,
+        origin_iata: data.normalized_intent.origin_iata,
+        destination_iata: data.normalized_intent.destination_iata,
+      };
+    }
+    return null;
+  }, [data]);
+
+  function handleTrack() {
+    if (!trackIntent) return;
+    let items = loadTracking();
+    if (trackIntent.kind === "flight") {
+      items = addTrackedFlight(trackIntent.flight_number);
+    } else {
+      items = addTrackedRoute(trackIntent.origin_iata, trackIntent.destination_iata);
+    }
+    if (items.length >= 20) {
+      setTrackNotice("Tracked. Max is 20 items; oldest entries are dropped automatically.");
+      return;
+    }
+    setTrackNotice(`Tracked ${trackIntent.kind === "flight" ? trackIntent.flight_number : `${trackIntent.origin_iata} -> ${trackIntent.destination_iata}`}.`);
   }
 
   return (
@@ -127,13 +169,22 @@ export function FlightSearchWidget() {
       )}
 
       {data?.ok && data.summary && (
-        <div className="grid gap-2 sm:grid-cols-4">
+        <div className="grid gap-2 sm:grid-cols-5">
           <div className="rounded-lg border border-zinc-300 bg-white p-2 text-xs">Flights: {data.summary.total}</div>
           <div className="rounded-lg border border-zinc-300 bg-white p-2 text-xs text-amber-700">Delayed: {data.summary.delayed}</div>
           <div className="rounded-lg border border-zinc-300 bg-white p-2 text-xs text-red-700">Cancelled: {data.summary.cancelled}</div>
           <div className="rounded-lg border border-zinc-300 bg-white p-2 text-xs text-zinc-700">Source: {data.source ?? "n/a"}</div>
+          {trackIntent ? (
+            <button onClick={handleTrack} className="rounded-lg border border-zinc-500 bg-white p-2 text-xs font-medium hover:bg-zinc-100">
+              {trackIntent.kind === "flight" ? "Track this flight" : "Track this route"}
+            </button>
+          ) : (
+            <div className="rounded-lg border border-zinc-300 bg-zinc-50 p-2 text-xs text-zinc-500">Track unavailable</div>
+          )}
         </div>
       )}
+
+      {trackNotice ? <p className="text-xs text-emerald-700">{trackNotice}</p> : null}
 
       {data?.ok && data.explanation && <pre className="whitespace-pre-wrap rounded-lg bg-zinc-100 p-3 text-xs text-zinc-700">{data.explanation}</pre>}
 

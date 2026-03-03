@@ -4,6 +4,13 @@ import { getSupabaseAdmin } from "./supabase";
 import { ingestAirports } from "./flightradar";
 import { fetchViaChromeRelay } from "./chrome-relay";
 import { pollOfficialXSignals } from "./x-signals";
+import { extractHtmlSnapshot } from "./source-extractors";
+import {
+  computeUpdateContentHash,
+  getValidationMaxPerIngest,
+  validateOfficialUpdate,
+  ValidationMetadata,
+} from "./update-validation";
 
 type Snapshot = {
   source_id: string;
@@ -23,6 +30,12 @@ type Snapshot = {
   freshness_target_minutes: number;
   evidence_basis: "api" | "official_web" | "rss" | "relay" | "x+official";
   confirmation_state: "confirmed" | "unconfirmed_social";
+  content_hash: string | null;
+  validation_state: ValidationMetadata["validation_state"];
+  validation_score: number | null;
+  validation_reason: string | null;
+  validation_model: string | null;
+  validated_at: string | null;
 };
 
 const parser = new XMLParser({ ignoreAttributes: false });
@@ -31,6 +44,81 @@ const CRITICAL_SOURCE_IDS = new Set(["emirates_updates", "etihad_advisory", "oma
 const AIRPORTS = ["DXB", "AUH"] as const;
 
 type IngestScope = "full" | "airline";
+
+type ExistingSnapshotMeta = {
+  source_id: string;
+  content_hash: string | null;
+  validation_state: ValidationMetadata["validation_state"];
+  validation_score: number | null;
+  validation_reason: string | null;
+  validation_model: string | null;
+  validated_at: string | null;
+  fetched_at: string;
+};
+
+function skippedValidation(reason: string): ValidationMetadata {
+  return {
+    validation_state: "skipped",
+    validation_score: null,
+    validation_reason: reason.slice(0, 400),
+    validation_model: null,
+    validated_at: null,
+  };
+}
+
+function withValidation(snapshot: Snapshot, hash: string, meta: ValidationMetadata): Snapshot {
+  return {
+    ...snapshot,
+    content_hash: hash,
+    validation_state: meta.validation_state,
+    validation_score: meta.validation_score,
+    validation_reason: meta.validation_reason,
+    validation_model: meta.validation_model,
+    validated_at: meta.validated_at,
+  };
+}
+
+async function loadLatestSnapshotValidationBySource(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  sourceIds: string[],
+): Promise<Map<string, ExistingSnapshotMeta>> {
+  if (sourceIds.length === 0) return new Map();
+  const { data, error } = await supabase
+    .from("source_snapshots")
+    .select("source_id,content_hash,validation_state,validation_score,validation_reason,validation_model,validated_at,fetched_at")
+    .in("source_id", sourceIds)
+    .order("fetched_at", { ascending: false })
+    .limit(Math.max(200, sourceIds.length * 15));
+  if (error) return new Map();
+
+  const latest = new Map<string, ExistingSnapshotMeta>();
+  for (const row of (data ?? []) as ExistingSnapshotMeta[]) {
+    if (!latest.has(row.source_id)) latest.set(row.source_id, row);
+  }
+  return latest;
+}
+
+function getXPollIntervalMinutes(): number {
+  const raw = process.env.X_MIN_POLL_MINUTES ?? process.env.X_POLL_INTERVAL_MINUTES;
+  const parsed = raw ? Number(raw) : NaN;
+  if (Number.isFinite(parsed) && parsed > 0) return Math.round(parsed);
+  return process.env.NODE_ENV === "development" ? 120 : 15;
+}
+
+async function shouldPollX(supabase: ReturnType<typeof getSupabaseAdmin>): Promise<{ poll: boolean; reason: string | null }> {
+  const intervalMins = getXPollIntervalMinutes();
+  const cutoff = new Date(Date.now() - intervalMins * 60_000).toISOString();
+  const { data, error } = await supabase
+    .from("social_signals")
+    .select("fetched_at")
+    .eq("provider", "x")
+    .gte("fetched_at", cutoff)
+    .order("fetched_at", { ascending: false })
+    .limit(1);
+  if (error) return { poll: true, reason: null };
+  if ((data ?? []).length === 0) return { poll: true, reason: null };
+  return { poll: false, reason: `X polling throttled by X_MIN_POLL_MINUTES=${intervalMins}` };
+}
 
 function inferLevel(text: string): Snapshot["status_level"] {
   const t = text.toLowerCase();
@@ -45,21 +133,6 @@ function inferReliability(text: string, status = 200): Snapshot["reliability"] {
   if (status === 401 || status === 403 || status === 429) return "blocked";
   if (BLOCK_PATTERNS.some((r) => r.test(text))) return "blocked";
   return "reliable";
-}
-
-function extractTitleAndSummary(source: SourceDef, html: string): { title: string; summary: string; raw_text: string } {
-  const title = html.match(/<title[^>]*>(.*?)<\/title>/i)?.[1]?.trim() ?? source.name;
-  const stripped = html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const signalMatch = stripped.match(/(travel updates?|alerts?|advisories?|service updates?|news)[^.?!]{0,260}[.?!]?/i);
-  const summary = (signalMatch?.[0] ?? stripped).slice(0, 1000);
-  return { title, summary, raw_text: stripped.slice(0, 10000) };
 }
 
 async function fetchRss(source: SourceDef): Promise<Snapshot> {
@@ -93,6 +166,12 @@ async function fetchRss(source: SourceDef): Promise<Snapshot> {
     freshness_target_minutes: source.freshness_target_minutes,
     evidence_basis: "rss",
     confirmation_state: "confirmed",
+    content_hash: null,
+    validation_state: "unvalidated",
+    validation_score: null,
+    validation_reason: null,
+    validation_model: null,
+    validated_at: null,
   };
 }
 
@@ -122,9 +201,19 @@ async function fetchHtml(source: SourceDef): Promise<Snapshot> {
     }
   }
 
-  const extracted = extractTitleAndSummary(source, html);
-  const reliability = inferReliability(extracted.raw_text, httpStatus);
-  const blockReason = reliability === "blocked" ? "Source indicates anti-bot or access block" : null;
+  const extracted = extractHtmlSnapshot(source, html);
+  let reliability = inferReliability(extracted.raw_text, httpStatus);
+  if (extracted.unusable && reliability === "reliable") reliability = "degraded";
+  const blockReason =
+    reliability === "blocked"
+      ? "Source indicates anti-bot or access block"
+      : extracted.unusable
+        ? "Unusable content extracted from source page"
+        : null;
+  const summary = extracted.unusable
+    ? "Source page content was unavailable or non-usable in this fetch. Open Official source for live details."
+    : extracted.summary;
+  const statusLevel = extracted.unusable ? "unknown" : inferLevel(`${extracted.title} ${summary}`);
 
   return {
     source_id: source.id,
@@ -132,11 +221,11 @@ async function fetchHtml(source: SourceDef): Promise<Snapshot> {
     source_url: sourceUrl,
     category: source.category,
     fetched_at: new Date().toISOString(),
-    published_at: null,
+    published_at: extracted.published_at,
     title: extracted.title,
-    summary: extracted.summary,
+    summary,
     raw_text: extracted.raw_text,
-    status_level: inferLevel(`${extracted.title} ${extracted.summary}`),
+    status_level: statusLevel,
     ingest_method: method,
     reliability,
     block_reason: blockReason,
@@ -144,6 +233,12 @@ async function fetchHtml(source: SourceDef): Promise<Snapshot> {
     freshness_target_minutes: source.freshness_target_minutes,
     evidence_basis: method === "relay" ? "relay" : "official_web",
     confirmation_state: "confirmed",
+    content_hash: null,
+    validation_state: "unvalidated",
+    validation_score: null,
+    validation_reason: null,
+    validation_model: null,
+    validated_at: null,
   };
 }
 
@@ -159,17 +254,76 @@ export async function runIngestion(opts?: { scope?: IngestScope }) {
   const supabase = getSupabaseAdmin();
   const snapshots: Snapshot[] = [];
   const sources = getSourcesForScope(scope);
+  const latestSnapshotValidation = await loadLatestSnapshotValidationBySource(
+    supabase,
+    sources.map((source) => source.id),
+  );
+  const validationBudget = getValidationMaxPerIngest();
+  let validationRuns = 0;
   let flightCount = 0;
   let flightError: string | null = null;
   let signalCount = 0;
   let signalError: string | null = null;
+  let signalSkipped = false;
+  let signalSkipReason: string | null = null;
+
+  async function validateSnapshot(snapshot: Snapshot): Promise<Snapshot> {
+    const contentHash = computeUpdateContentHash({
+      source_id: snapshot.source_id,
+      update_type: "snapshot",
+      headline: snapshot.title,
+      summary: snapshot.summary,
+      original_url: snapshot.source_url,
+    });
+    const previous = latestSnapshotValidation.get(snapshot.source_id);
+    if (previous?.content_hash && previous.content_hash === contentHash) {
+      return withValidation(snapshot, contentHash, {
+        validation_state: previous.validation_state,
+        validation_score: previous.validation_score,
+        validation_reason: previous.validation_reason,
+        validation_model: previous.validation_model,
+        validated_at: previous.validated_at,
+      });
+    }
+
+    if (/fetch error/i.test(snapshot.title)) {
+      return withValidation(snapshot, contentHash, skippedValidation("Skipped GPT validation for fetch-error snapshot"));
+    }
+    if (validationRuns >= validationBudget) {
+      return withValidation(snapshot, contentHash, skippedValidation(`Validation budget reached (${validationBudget} items)`));
+    }
+
+    validationRuns += 1;
+    const validation = await validateOfficialUpdate({
+      source_id: snapshot.source_id,
+      update_type: "snapshot",
+      headline: snapshot.title,
+      summary: snapshot.summary,
+      original_url: snapshot.source_url,
+      raw_text: snapshot.raw_text,
+    });
+    return withValidation(snapshot, contentHash, validation);
+  }
 
   for (const source of sources) {
     try {
       const snap = source.parser === "rss" ? await fetchRss(source) : await fetchHtml(source);
-      snapshots.push(snap);
+      const validated = await validateSnapshot(snap);
+      snapshots.push(validated);
+      latestSnapshotValidation.set(source.id, {
+        source_id: source.id,
+        content_hash: validated.content_hash,
+        validation_state: validated.validation_state,
+        validation_score: validated.validation_score,
+        validation_reason: validated.validation_reason,
+        validation_model: validated.validation_model,
+        validated_at: validated.validated_at,
+        fetched_at: validated.fetched_at,
+      });
     } catch (error) {
-      snapshots.push({
+      const errorText = String(error);
+      const blocked = /403|401|429|denied|rejected|forbidden|captcha/i.test(errorText);
+      const failureSnapshot: Snapshot = {
         source_id: source.id,
         source_name: source.name,
         source_url: source.url,
@@ -177,16 +331,36 @@ export async function runIngestion(opts?: { scope?: IngestScope }) {
         fetched_at: new Date().toISOString(),
         published_at: null,
         title: `${source.name} fetch error`,
-        summary: String(error),
+        summary: blocked
+          ? "Source currently blocked or challenge-protected. Open Official source for live details."
+          : "Source fetch failed during ingestion. Open Official source for live details.",
         raw_text: "",
         status_level: "unknown",
         ingest_method: source.parser === "rss" ? "rss" : "official_web",
-        reliability: /403|401|429|denied|rejected|forbidden/i.test(String(error)) ? "blocked" : "degraded",
-        block_reason: /denied|rejected|forbidden|captcha/i.test(String(error)) ? String(error).slice(0, 200) : null,
+        reliability: blocked ? "blocked" : "degraded",
+        block_reason: blocked ? errorText.slice(0, 200) : null,
         priority: source.priority,
         freshness_target_minutes: source.freshness_target_minutes,
         evidence_basis: source.parser === "rss" ? "rss" : "official_web",
         confirmation_state: "confirmed",
+        content_hash: null,
+        validation_state: "unvalidated",
+        validation_score: null,
+        validation_reason: null,
+        validation_model: null,
+        validated_at: null,
+      };
+      const validated = await validateSnapshot(failureSnapshot);
+      snapshots.push(validated);
+      latestSnapshotValidation.set(source.id, {
+        source_id: source.id,
+        content_hash: validated.content_hash,
+        validation_state: validated.validation_state,
+        validation_score: validated.validation_score,
+        validation_reason: validated.validation_reason,
+        validation_model: validated.validation_model,
+        validated_at: validated.validated_at,
+        fetched_at: validated.fetched_at,
       });
     }
   }
@@ -209,6 +383,11 @@ export async function runIngestion(opts?: { scope?: IngestScope }) {
 
   if (scope === "airline") {
     try {
+      const pollDecision = await shouldPollX(supabase);
+      if (!pollDecision.poll) {
+        signalSkipped = true;
+        signalSkipReason = pollDecision.reason;
+      } else {
       const handles = Array.from(
         new Set(
           sources
@@ -232,13 +411,58 @@ export async function runIngestion(opts?: { scope?: IngestScope }) {
       }
 
       const socialSignals = await pollOfficialXSignals(sources, { knownPostIds, translateLimitPerHandle: 3 });
-      if (socialSignals.length > 0) {
+      const freshSignals = socialSignals.filter((signal) => !knownPostIds.has(`${signal.handle}:${signal.post_id}`));
+      type SocialSignalInsert = (typeof freshSignals)[number] & {
+        content_hash: string | null;
+        validation_state: ValidationMetadata["validation_state"];
+        validation_score: number | null;
+        validation_reason: string | null;
+        validation_model: string | null;
+        validated_at: string | null;
+      };
+      const validatedSignals: SocialSignalInsert[] = [];
+      for (const signal of freshSignals) {
+        const text = signal.text_en ?? signal.text_original ?? signal.text;
+        const contentHash = computeUpdateContentHash({
+          source_id: signal.linked_source_id,
+          update_type: "x",
+          headline: `@${signal.handle} on X`,
+          summary: text,
+          original_url: signal.url,
+        });
+        let validation: ValidationMetadata;
+        if (validationRuns >= validationBudget) {
+          validation = skippedValidation(`Validation budget reached (${validationBudget} items)`);
+        } else {
+          validationRuns += 1;
+          validation = await validateOfficialUpdate({
+            source_id: signal.linked_source_id,
+            update_type: "x",
+            headline: `@${signal.handle} on X`,
+            summary: text,
+            original_url: signal.url,
+            raw_text: signal.text_original ?? signal.text,
+          });
+        }
+        validatedSignals.push({
+          ...signal,
+          content_hash: contentHash,
+          validation_state: validation.validation_state,
+          validation_score: validation.validation_score,
+          validation_reason: validation.validation_reason,
+          validation_model: validation.validation_model,
+          validated_at: validation.validated_at,
+        });
+      }
+
+      if (validatedSignals.length > 0) {
         const { error: socialErr } = await supabase
           .from("social_signals")
-          .upsert(socialSignals, { onConflict: "provider,handle,post_id", ignoreDuplicates: true });
+          .upsert(validatedSignals, { onConflict: "provider,handle,post_id", ignoreDuplicates: true });
         if (socialErr) throw socialErr;
       }
-      signalCount = socialSignals.length;
+      signalCount = validatedSignals.length;
+      }
     } catch (error) {
       signalError = String(error);
     }
@@ -252,5 +476,10 @@ export async function runIngestion(opts?: { scope?: IngestScope }) {
     flight_error: flightError,
     signal_count: signalCount,
     signal_error: signalError,
+    signal_skipped: signalSkipped,
+    signal_skip_reason: signalSkipReason,
+    x_min_poll_minutes: getXPollIntervalMinutes(),
+    validation_runs: validationRuns,
+    validation_budget: validationBudget,
   };
 }

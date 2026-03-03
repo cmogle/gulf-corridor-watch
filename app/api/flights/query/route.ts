@@ -1,6 +1,22 @@
 import { runFlightQuery } from "@/lib/flight-query";
 import OpenAI from "openai";
 
+function normalizedIntent(intent: Awaited<ReturnType<typeof runFlightQuery>>["intent"]) {
+  if (intent.type === "flight_number") {
+    return { type: "flight_number" as const, flight_number: intent.flightNumber };
+  }
+  if (intent.type === "route") {
+    return {
+      type: "route" as const,
+      origin_iata: intent.originCodes[0] ?? null,
+      destination_iata: intent.destinationCodes[0] ?? null,
+      origin_codes: intent.originCodes,
+      destination_codes: intent.destinationCodes,
+    };
+  }
+  return { type: "unknown" as const };
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -11,7 +27,7 @@ export async function POST(req: Request) {
 
     const result = await runFlightQuery(query, { allowLive });
     if (mode !== "explain") {
-      return Response.json({ ok: true, mode, ...result });
+      return Response.json({ ok: true, mode, normalized_intent: normalizedIntent(result.intent), ...result });
     }
 
     if (!process.env.OPENAI_API_KEY) {
@@ -54,7 +70,7 @@ ${contextRows || "none"}`,
     });
 
     const explanation = completion.choices[0]?.message?.content ?? null;
-    return Response.json({ ok: true, mode, ...result, explanation });
+    return Response.json({ ok: true, mode, normalized_intent: normalizedIntent(result.intent), ...result, explanation });
   } catch (error) {
     return Response.json({ ok: false, error: String(error) }, { status: 500 });
   }

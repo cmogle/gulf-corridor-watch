@@ -135,12 +135,59 @@ function inferReliability(text: string, status = 200): Snapshot["reliability"] {
   return "reliable";
 }
 
-async function fetchRss(source: SourceDef): Promise<Snapshot> {
-  const res = await fetch(source.url, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`RSS fetch failed (${res.status})`);
+const BROWSERISH_HEADERS: Record<string, string> = {
+  "user-agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "accept-language": "en-US,en;q=0.9",
+  accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "cache-control": "no-cache",
+  pragma: "no-cache",
+};
+
+function getFallbackUrls(source: SourceDef): string[] {
+  const map: Record<string, string[]> = {
+    us_state_dept_travel: ["https://travel.state.gov/_res/rss/TAsTWs.xml"],
+    india_mea: ["https://mea.gov.in/press-releases.htm?51/Press_Releases="],
+    india_immigration_boi: ["https://boi.gov.in/boi"],
+    visit_dubai_news: ["https://www.mediaoffice.ae/en/news"],
+    etihad_advisory: ["https://www.etihad.com/en-ae/help/travel-updates"],
+  };
+  return map[source.id] ?? [];
+}
+
+function asJinaMirror(url: string): string {
+  return `https://r.jina.ai/http://${url.replace(/^https?:\/\//, "")}`;
+}
+
+async function fetchTextWithFallback(urls: string[], mode: "rss" | "html"): Promise<{ text: string; finalUrl: string; status: number; fromMirror: boolean }> {
+  const candidates = [...urls];
+  for (const original of urls) candidates.push(asJinaMirror(original));
+
+  let lastError: unknown = null;
+  for (const candidate of candidates) {
+    const fromMirror = candidate.startsWith("https://r.jina.ai/");
+    try {
+      const res = await fetch(candidate, { cache: "no-store", headers: BROWSERISH_HEADERS });
+      const text = await res.text();
+      const reliable = inferReliability(text, res.status);
+      const looksLikeRss = /<rss[\s>]|<feed[\s>]/i.test(text);
+      if (mode === "rss" && !looksLikeRss && !fromMirror) {
+        throw new Error(`Not RSS content (${res.status})`);
+      }
+      if (!res.ok || reliable === "blocked") {
+        throw new Error(`Fetch blocked/failed (${res.status})`);
+      }
+      return { text, finalUrl: res.url || candidate, status: res.status, fromMirror };
+    } catch (error) {
+      lastError = error;
+      continue;
+    }
   }
-  const xml = await res.text();
+  throw new Error(`All fetch attempts failed: ${String(lastError ?? "unknown")}`);
+}
+
+async function fetchRss(source: SourceDef): Promise<Snapshot> {
+  const { text: xml, finalUrl, status } = await fetchTextWithFallback([source.url, ...getFallbackUrls(source)], "rss");
   const parsed = parser.parse(xml);
   const item = parsed?.rss?.channel?.item?.[0] ?? parsed?.rss?.channel?.item;
 
@@ -151,7 +198,7 @@ async function fetchRss(source: SourceDef): Promise<Snapshot> {
   return {
     source_id: source.id,
     source_name: source.name,
-    source_url: source.url,
+    source_url: finalUrl,
     category: source.category,
     fetched_at: new Date().toISOString(),
     published_at: published,
@@ -160,7 +207,7 @@ async function fetchRss(source: SourceDef): Promise<Snapshot> {
     raw_text: xml.slice(0, 10000),
     status_level: inferLevel(`${title} ${summary}`),
     ingest_method: "rss",
-    reliability: inferReliability(xml, res.status),
+    reliability: inferReliability(xml, status),
     block_reason: null,
     priority: source.priority,
     freshness_target_minutes: source.freshness_target_minutes,
@@ -181,14 +228,11 @@ async function fetchHtml(source: SourceDef): Promise<Snapshot> {
   let method: Snapshot["ingest_method"] = "official_web";
   let httpStatus = 200;
   try {
-    const res = await fetch(source.url, { cache: "no-store" });
-    httpStatus = res.status;
-    html = await res.text();
-    sourceUrl = res.url || source.url;
-    const reliability = inferReliability(html, res.status);
-    if (!res.ok || reliability === "blocked") {
-      throw new Error(`Direct HTML fetch ${res.status} (${reliability})`);
-    }
+    const direct = await fetchTextWithFallback([source.url, ...getFallbackUrls(source)], "html");
+    html = direct.text;
+    sourceUrl = direct.finalUrl;
+    httpStatus = direct.status;
+    if (direct.fromMirror) method = "relay";
   } catch (error) {
     if (source.fallback_connector === "chrome_relay") {
       const relayed = await fetchViaChromeRelay(source.url);

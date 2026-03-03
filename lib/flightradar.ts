@@ -147,6 +147,8 @@ async function fetchJson(path: string, params: URLSearchParams): Promise<{ paylo
     headers: {
       Authorization: `Bearer ${apiKey}`,
       Accept: "application/json",
+      "Accept-Version": "v1",
+      "User-Agent": "gulf-corridor-watch/1.0",
     },
     cache: "no-store",
   });

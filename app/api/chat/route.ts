@@ -2,6 +2,17 @@ import OpenAI from "openai";
 import { flightsToContextRows, parseFlightIntent, runFlightQuery } from "@/lib/flight-query";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
+type SocialContextRow = {
+  linked_source_id: string;
+  handle: string;
+  posted_at: string;
+  url: string;
+  text_original: string | null;
+  text_en: string | null;
+  language_original: string | null;
+  translation_status: "not_needed" | "translated" | "failed";
+};
+
 export async function POST(req: Request) {
   try {
     const { question } = await req.json();
@@ -49,11 +60,31 @@ ${context || "No matching flights found."}`,
 
     if (error) throw error;
 
+    const { data: socialData } = await supabase
+      .from("social_signals")
+      .select("linked_source_id,handle,posted_at,url,text_original,text_en,language_original,translation_status")
+      .eq("provider", "x")
+      .order("posted_at", { ascending: false })
+      .limit(30);
+
+    const latestSocialBySource = new Map<string, SocialContextRow>();
+    for (const row of ((socialData ?? []) as SocialContextRow[])) {
+      if (!latestSocialBySource.has(row.linked_source_id)) latestSocialBySource.set(row.linked_source_id, row);
+    }
+
     const context = (data ?? [])
       .map(
         (d) =>
           `[${d.source_name}] status=${d.status_level} fetched=${d.fetched_at} published=${d.published_at ?? "n/a"}\nTitle: ${d.title}\nSummary: ${d.summary}\nURL: ${d.source_url}`
       )
+      .join("\n\n");
+
+    const socialContext = Array.from(latestSocialBySource.entries())
+      .map(([, s]) => {
+        const display = s.text_en ?? s.text_original ?? "";
+        const original = s.translation_status === "translated" ? `\nOriginal (${s.language_original ?? "unknown"}): ${s.text_original}` : "";
+        return `[X @${s.handle}] posted=${s.posted_at} status=${s.translation_status}\nText: ${display}${original}\nURL: ${s.url}`;
+      })
       .join("\n\n");
 
     const completion = await client.chat.completions.create({
@@ -63,9 +94,9 @@ ${context || "No matching flights found."}`,
         {
           role: "system",
           content:
-            "You are a travel disruption assistant. Answer only from provided official-source context. If unknown or stale, say so clearly. Always include source citations with URLs and fetched timestamps.",
+            "You are a travel disruption assistant. Answer only from provided official-source and official-X context. If unknown or stale, say so clearly. Always include source citations with URLs and fetched timestamps. Treat X posts as supplementary signal, not sole authority.",
         },
-        { role: "user", content: `Question: ${question}\n\nOfficial source context:\n${context}` },
+        { role: "user", content: `Question: ${question}\n\nOfficial source context:\n${context}\n\nOfficial X context:\n${socialContext || "No official X posts available."}` },
       ],
     });
 

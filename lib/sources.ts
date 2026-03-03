@@ -4,6 +4,22 @@ export type SourceDef = {
   category: "government" | "airline" | "transport";
   url: string;
   parser: "rss" | "html";
+  connector: "rss" | "direct_html" | "api";
+  fallback_connector?: "chrome_relay";
+  extractor_id:
+    | "rss_default"
+    | "html_title_text"
+    | "emirates_updates"
+    | "etihad_updates"
+    | "omanair_updates"
+    | "rta_news"
+    | "mofa_news"
+    | "visit_dubai_articles"
+    | "india_mea_press"
+    | "india_boi_home";
+  priority: number;
+  freshness_target_minutes: number;
+  x_handles?: string[];
   region: string;
 };
 
@@ -16,6 +32,10 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     category: "government",
     url: "https://travel.state.gov/content/travel/en/traveladvisories/traveladvisories.rss.xml",
     parser: "rss",
+    connector: "rss",
+    extractor_id: "rss_default",
+    priority: 80,
+    freshness_target_minutes: 15,
     region: "Global/US",
   },
   {
@@ -24,6 +44,12 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     category: "government",
     url: "https://www.mofa.gov.ae/en/mediahub/news",
     parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "mofa_news",
+    priority: 88,
+    freshness_target_minutes: 10,
+    x_handles: ["mofauae"],
     region: "UAE",
   },
   {
@@ -32,6 +58,11 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     category: "government",
     url: "https://www.visitdubai.com/en/articles",
     parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "visit_dubai_articles",
+    priority: 55,
+    freshness_target_minutes: 15,
     region: "Dubai",
   },
   {
@@ -40,6 +71,12 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     category: "airline",
     url: "https://www.emirates.com/ae/english/help/travel-updates/",
     parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "emirates_updates",
+    priority: 100,
+    freshness_target_minutes: 5,
+    x_handles: ["emirates"],
     region: "UAE",
   },
   {
@@ -48,6 +85,12 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     category: "airline",
     url: "https://www.etihad.com/en/help/travel-updates",
     parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "etihad_updates",
+    priority: 98,
+    freshness_target_minutes: 5,
+    x_handles: ["etihad"],
     region: "UAE",
   },
   {
@@ -56,6 +99,11 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     category: "airline",
     url: "https://www.omanair.com/om/en/travel-updates",
     parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "omanair_updates",
+    priority: 70,
+    freshness_target_minutes: 10,
     region: "Oman",
   },
   {
@@ -64,6 +112,12 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     category: "transport",
     url: "https://www.rta.ae/wps/portal/rta/ae/home/news-and-media/all-news",
     parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "rta_news",
+    priority: 90,
+    freshness_target_minutes: 5,
+    x_handles: ["rta_dubai"],
     region: "Dubai",
   },
   {
@@ -72,6 +126,11 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     category: "government",
     url: "https://www.mea.gov.in/press-releases.htm",
     parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "india_mea_press",
+    priority: 65,
+    freshness_target_minutes: 15,
     region: "India",
   },
   {
@@ -80,6 +139,11 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     category: "government",
     url: "https://boi.gov.in/",
     parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "india_boi_home",
+    priority: 72,
+    freshness_target_minutes: 15,
     region: "India",
   },
 ];

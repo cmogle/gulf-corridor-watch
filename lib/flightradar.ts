@@ -1,4 +1,10 @@
-const DEFAULT_BASE_URL = "https://fr24api.flightradar24.com/api";
+/**
+ * Flightradar24 API v1
+ * Live flight positions endpoint: /api/live/flight-positions/full
+ * Bounds format: lat_max,lat_min,lon_min,lon_max
+ */
+
+const DEFAULT_BASE_URL = "https://fr24api.flightradar24.com";
 
 export type AirportCode = "DXB" | "AUH";
 
@@ -24,7 +30,63 @@ export type FlightObservation = {
   fetched_at: string;
 };
 
-type QueryMode = "all" | "arrivals" | "departures";
+// Airport coordinates
+const AIRPORT_COORDS: Record<AirportCode, { lat: number; lon: number }> = {
+  DXB: { lat: 25.2528, lon: 55.3644 },
+  AUH: { lat: 24.4330, lon: 54.6511 },
+};
+
+// Wide UAE/Gulf airspace bounding box: lat_max,lat_min,lon_min,lon_max
+const UAE_GULF_BOUNDS = "27.0,23.0,53.0,57.5";
+
+function distKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function nearestAirport(lat: number, lon: number): AirportCode {
+  const dDXB = distKm(lat, lon, AIRPORT_COORDS.DXB.lat, AIRPORT_COORDS.DXB.lon);
+  const dAUH = distKm(lat, lon, AIRPORT_COORDS.AUH.lat, AIRPORT_COORDS.AUH.lon);
+  return dDXB <= dAUH ? "DXB" : "AUH";
+}
+
+type FR24Aircraft = {
+  fr24_id: string;
+  flight: string | null;
+  callsign: string | null;
+  lat: number;
+  lon: number;
+  track: number;
+  alt: number;
+  gspeed: number;
+  vspeed: number;
+  squawk: string | null;
+  timestamp: string;
+  source: string;
+  hex: string | null;
+  type: string | null;
+  reg: string | null;
+  painted_as: string | null;
+  operating_as: string | null;
+  orig_iata: string | null;
+  orig_icao: string | null;
+  dest_iata: string | null;
+  dest_icao: string | null;
+  eta: string | null;
+};
+
+function deriveStatus(ac: FR24Aircraft): string {
+  if (ac.alt === 0 && ac.gspeed < 50) return "on_ground";
+  if (ac.alt < 3000 && ac.vspeed < -200) return "approach";
+  if (ac.alt < 3000 && ac.vspeed > 200) return "departure";
+  if (ac.alt > 20000) return "cruise";
+  return "airborne";
+}
 
 function getConfig() {
   const apiKey = process.env.FLIGHTRADAR_KEY;
@@ -33,183 +95,73 @@ function getConfig() {
   return { apiKey, baseUrl };
 }
 
-function toIso(ts: unknown): string | null {
-  if (typeof ts === "number" && Number.isFinite(ts)) {
-    if (ts > 10_000_000_000) return new Date(ts).toISOString();
-    return new Date(ts * 1000).toISOString();
-  }
-  if (typeof ts === "string" && ts.trim()) {
-    const asNum = Number(ts);
-    if (!Number.isNaN(asNum)) return toIso(asNum);
-    const d = new Date(ts);
-    if (!Number.isNaN(d.getTime())) return d.toISOString();
-  }
-  return null;
-}
-
-function pick(obj: Record<string, unknown>, keys: string[]): unknown {
-  for (const key of keys) {
-    if (obj[key] !== undefined && obj[key] !== null) return obj[key];
-  }
-  return null;
-}
-
-function toArray(payload: unknown): Record<string, unknown>[] {
-  if (!payload || typeof payload !== "object") return [];
-  const root = payload as Record<string, unknown>;
-  const candidates = [
-    root.data,
-    root.results,
-    root.flights,
-    root.items,
-    (root.data as Record<string, unknown> | undefined)?.flights,
-    (root.result as Record<string, unknown> | undefined)?.flights,
-    (root.response as Record<string, unknown> | undefined)?.flights,
-  ];
-
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) return candidate.filter((x) => x && typeof x === "object") as Record<string, unknown>[];
-  }
-  return [];
-}
-
-function parseDelayMinutes(raw: Record<string, unknown>): number | null {
-  const direct = pick(raw, ["delay_minutes", "delayMinutes"]);
-  if (typeof direct === "number") return Math.max(0, Math.round(direct));
-  if (typeof direct === "string") {
-    const num = Number(direct);
-    if (!Number.isNaN(num)) return Math.max(0, Math.round(num));
-  }
-  const status = pick(raw, ["status"]) as Record<string, unknown> | null;
-  const nested = status && typeof status === "object" ? pick(status, ["delay", "delayMinutes"]) : null;
-  if (typeof nested === "number") return Math.max(0, Math.round(nested));
-  if (typeof nested === "string") {
-    const num = Number(nested);
-    if (!Number.isNaN(num)) return Math.max(0, Math.round(num));
-  }
-  return null;
-}
-
-function normalize(airport: AirportCode, raw: Record<string, unknown>, sourceUrl: string): FlightObservation | null {
-  const ident = pick(raw, ["flight_number", "flightNumber", "number", "callsign", "identification"]);
-  const identification = ident && typeof ident === "object" ? (ident as Record<string, unknown>) : null;
-  const number = typeof ident === "string" ? ident : (pick(identification ?? {}, ["number", "default"]) as string | null);
-
-  const flightNumber = number?.toUpperCase().replace(/\s+/g, "") ?? "";
-  if (!flightNumber) return null;
-
-  const time = (pick(raw, ["time"]) as Record<string, unknown> | null) ?? null;
-  const scheduled = toIso(pick(raw, ["scheduled_time", "scheduledTime", "scheduled"]) ?? pick(time ?? {}, ["scheduled", "scheduled_time"]));
-  const estimated = toIso(pick(raw, ["estimated_time", "estimatedTime", "estimated"]) ?? pick(time ?? {}, ["estimated", "estimated_time"]));
-  const actual = toIso(pick(raw, ["actual_time", "actualTime", "actual"]) ?? pick(time ?? {}, ["real", "actual", "actual_time"]));
-
-  const airportInfo = (pick(raw, ["airport"]) as Record<string, unknown> | null) ?? null;
-  const origin = (pick(raw, ["origin"]) as Record<string, unknown> | null) ?? (pick(airportInfo ?? {}, ["origin"]) as Record<string, unknown> | null);
-  const destination = (pick(raw, ["destination"]) as Record<string, unknown> | null) ?? (pick(airportInfo ?? {}, ["destination"]) as Record<string, unknown> | null);
-
-  const statusRaw =
-    (pick(raw, ["status", "flight_status", "flightStatus"]) as Record<string, unknown> | string | null) ?? "unknown";
-  const status =
-    typeof statusRaw === "string"
-      ? statusRaw.toLowerCase()
-      : String(pick(statusRaw, ["text", "generic", "live"]) ?? "unknown").toLowerCase();
-
-  const delayMinutes = parseDelayMinutes(raw);
-  const isDelayed = delayMinutes !== null ? delayMinutes > 0 : /delay|late/.test(status);
-
-  return {
-    airport,
-    flight_number: flightNumber,
-    callsign: (pick(raw, ["callsign"]) as string | null) ?? (pick(identification ?? {}, ["callsign"]) as string | null),
-    icao24: (pick(raw, ["icao24", "hex"]) as string | null) ?? null,
-    flight_id: (pick(raw, ["id", "flight_id", "flightId"]) as string | null) ?? null,
-    airline: (pick(raw, ["airline", "airline_name", "airlineName"]) as string | null) ?? null,
-    origin_iata: (pick(origin ?? {}, ["iata", "iataCode", "code"]) as string | null)?.toUpperCase() ?? null,
-    origin_name: (pick(origin ?? {}, ["name"]) as string | null) ?? null,
-    destination_iata: (pick(destination ?? {}, ["iata", "iataCode", "code"]) as string | null)?.toUpperCase() ?? null,
-    destination_name: (pick(destination ?? {}, ["name"]) as string | null) ?? null,
-    scheduled_time: scheduled,
-    estimated_time: estimated,
-    actual_time: actual,
-    status,
-    is_delayed: isDelayed,
-    delay_minutes: delayMinutes,
-    source_url: sourceUrl,
-    raw_payload: raw,
-    fetched_at: new Date().toISOString(),
-  };
-}
-
-async function fetchJson(path: string, params: URLSearchParams): Promise<{ payload: unknown; sourceUrl: string }> {
+export async function ingestAirports(_airports: AirportCode[]): Promise<FlightObservation[]> {
   const { apiKey, baseUrl } = getConfig();
-  const url = `${baseUrl}${path}?${params.toString()}`;
+  const url = `${baseUrl}/api/live/flight-positions/full?bounds=${UAE_GULF_BOUNDS}&limit=500`;
+
   const res = await fetch(url, {
+    cache: "no-store",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       Accept: "application/json",
       "Accept-Version": "v1",
       "User-Agent": "gulf-corridor-watch/1.0",
     },
-    cache: "no-store",
   });
+
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Flightradar request failed (${res.status}) ${url} ${body.slice(0, 300)}`);
+    throw new Error(`Flightradar request failed (${res.status}) ${body.slice(0, 200)}`);
   }
-  return { payload: await res.json(), sourceUrl: url };
+
+  const payload = (await res.json()) as { data: FR24Aircraft[] };
+  const aircraft = payload.data ?? [];
+  const fetched_at = new Date().toISOString();
+
+  return aircraft
+    .filter((ac) => ac.lat != null && ac.lon != null)
+    .map((ac) => {
+      const airport = nearestAirport(ac.lat, ac.lon);
+      const flightNum = (ac.flight ?? ac.callsign ?? "").trim().toUpperCase();
+
+      return {
+        airport,
+        flight_number: flightNum || ac.fr24_id,
+        callsign: ac.callsign,
+        icao24: ac.hex,
+        flight_id: ac.fr24_id,
+        airline: ac.operating_as ?? ac.painted_as ?? null,
+        origin_iata: ac.orig_iata,
+        origin_name: null,
+        destination_iata: ac.dest_iata,
+        destination_name: null,
+        scheduled_time: null,
+        estimated_time: ac.eta,
+        actual_time: ac.timestamp,
+        status: deriveStatus(ac),
+        is_delayed: false,
+        delay_minutes: null,
+        source_url: url,
+        raw_payload: ac,
+        fetched_at,
+      };
+    });
 }
 
-async function fetchAirportWithCandidates(airport: AirportCode, mode: QueryMode): Promise<FlightObservation[]> {
-  const candidates = [
-    { path: `/airports/${airport}/flights`, params: new URLSearchParams({ mode, limit: "200" }) },
-    { path: `/airport/${airport}/flights`, params: new URLSearchParams({ mode, limit: "200" }) },
-    { path: `/airports/${airport}/live`, params: new URLSearchParams({ limit: "200" }) },
-    { path: `/flights/airport/${airport}`, params: new URLSearchParams({ mode, limit: "200" }) },
-  ];
-
-  let lastError: unknown = null;
-  for (const candidate of candidates) {
-    try {
-      const { payload, sourceUrl } = await fetchJson(candidate.path, candidate.params);
-      const rows = toArray(payload)
-        .map((r) => normalize(airport, r, sourceUrl))
-        .filter((r): r is FlightObservation => Boolean(r));
-      if (rows.length > 0) return rows;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw new Error(`Unable to fetch ${airport} board: ${String(lastError ?? "unknown error")}`);
-}
-
+// Keep legacy exports for any callers
 export async function getAirportBoards(airport: AirportCode): Promise<FlightObservation[]> {
-  const [arrivals, departures] = await Promise.all([
-    fetchAirportWithCandidates(airport, "arrivals"),
-    fetchAirportWithCandidates(airport, "departures"),
-  ]);
-  return [...arrivals, ...departures];
-}
-
-export async function ingestAirports(airports: AirportCode[]): Promise<FlightObservation[]> {
-  const batches = await Promise.all(airports.map((airport) => getAirportBoards(airport)));
-  return batches.flat();
-}
-
-function normalizeFlightNumber(input: string): string {
-  return input.toUpperCase().replace(/\s+/g, "");
+  return ingestAirports([airport]);
 }
 
 export async function findFlightByNumber(flightNumber: string): Promise<FlightObservation[]> {
-  const number = normalizeFlightNumber(flightNumber);
-  const airports: AirportCode[] = ["DXB", "AUH"];
-  const all = await ingestAirports(airports);
-  return all.filter((row) => normalizeFlightNumber(row.flight_number) === number);
+  const all = await ingestAirports(["DXB", "AUH"]);
+  const fn = flightNumber.toUpperCase().replace(/\s+/g, "");
+  return all.filter((r) => r.flight_number === fn || r.callsign === fn);
 }
 
 export async function findRouteFlights(originIata: string, destinationIata: string): Promise<FlightObservation[]> {
-  const origin = originIata.toUpperCase().trim();
-  const destination = destinationIata.toUpperCase().trim();
-  const airports: AirportCode[] = ["DXB", "AUH"];
-  const all = await ingestAirports(airports);
-  return all.filter((row) => row.origin_iata === origin && row.destination_iata === destination);
+  const all = await ingestAirports(["DXB", "AUH"]);
+  return all.filter(
+    (r) => r.origin_iata === originIata.toUpperCase() && r.destination_iata === destinationIata.toUpperCase()
+  );
 }

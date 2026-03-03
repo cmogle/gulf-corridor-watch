@@ -1,6 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { OFFICIAL_SOURCES, SourceDef } from "./sources";
 import { getSupabaseAdmin } from "./supabase";
+import { ingestAirports } from "./flightradar";
 
 type Snapshot = {
   source_id: string;
@@ -72,6 +73,8 @@ async function fetchHtml(source: SourceDef): Promise<Snapshot> {
 export async function runIngestion() {
   const supabase = getSupabaseAdmin();
   const snapshots: Snapshot[] = [];
+  let flightCount = 0;
+  let flightError: string | null = null;
 
   for (const source of OFFICIAL_SOURCES) {
     try {
@@ -96,5 +99,18 @@ export async function runIngestion() {
   const { error } = await supabase.from("source_snapshots").insert(snapshots);
   if (error) throw error;
 
-  return { count: snapshots.length, snapshots };
+  if (process.env.FLIGHTRADAR_KEY) {
+    try {
+      const flights = await ingestAirports(["DXB", "AUH"]);
+      if (flights.length > 0) {
+        const { error: flightInsertError } = await supabase.from("flight_observations").insert(flights);
+        if (flightInsertError) throw flightInsertError;
+      }
+      flightCount = flights.length;
+    } catch (error) {
+      flightError = String(error);
+    }
+  }
+
+  return { count: snapshots.length, snapshots, flight_count: flightCount, flight_error: flightError };
 }

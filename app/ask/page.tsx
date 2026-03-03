@@ -26,7 +26,7 @@ export default function AskPage() {
       <textarea
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Example: Are Emirates and Etihad currently reporting major disruptions to DXB flights?"
+        placeholder="Examples: What’s the status of EK511? | What flights from DXB to DEL are delayed right now?"
         className="w-full min-h-32 rounded-xl border p-3"
       />
       <button onClick={ask} disabled={loading || !q.trim()} className="rounded-lg bg-black text-white px-4 py-2 disabled:opacity-50">

@@ -67,22 +67,6 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     region: "Dubai",
   },
   {
-    id: "flightradar_dxb",
-    name: "Flightradar24 DXB Arrivals/Departures",
-    category: "transport",
-    url: "https://www.flightradar24.com/data/airports/dxb",
-    parser: "html",
-    region: "Dubai",
-  },
-  {
-    id: "flightradar_auh",
-    name: "Flightradar24 AUH Arrivals/Departures",
-    category: "transport",
-    url: "https://www.flightradar24.com/data/airports/auh",
-    parser: "html",
-    region: "Abu Dhabi",
-  },
-  {
     id: "india_mea",
     name: "India MEA Advisories",
     category: "government",

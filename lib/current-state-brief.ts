@@ -7,7 +7,8 @@ const BRIEF_KEY = "global";
 const DEFAULT_MODEL = "gpt-4o-mini";
 const DEFAULT_TIMEOUT_MS = 8000;
 const EXPECTED_MISSING_SOURCES = ["india_consulate_dubai", "india_embassy_abu_dhabi", "broader_mena_ministries"];
-export const NARRATIVE_POLICY_VERSION = "v2_text_first_no_source_counts";
+export const NARRATIVE_POLICY_VERSION = "v3_strict_extractive_no_source_counts";
+const DEFAULT_BRIEF_GENERATION_MODE = "extractive";
 
 export type BriefFreshnessState = "fresh" | "mixed" | "stale";
 export type BriefConfidence = "high" | "medium" | "low";
@@ -160,6 +161,12 @@ function parsePositiveInt(raw: string | undefined, fallback: number): number {
   return Math.round(parsed);
 }
 
+function getBriefGenerationMode(): "extractive" | "llm" {
+  const raw = process.env.CURRENT_STATE_BRIEF_GENERATION_MODE?.trim().toLowerCase();
+  if (raw === "llm") return "llm";
+  return DEFAULT_BRIEF_GENERATION_MODE;
+}
+
 function toMillis(iso: string | null | undefined): number {
   if (!iso) return 0;
   const parsed = new Date(iso).getTime();
@@ -214,6 +221,7 @@ function formatDubaiTime(iso: string): string {
 }
 
 function trafficLevel(totalFlights: number): string {
+  if (totalFlights === 0) return "unclear";
   if (totalFlights <= 20) return "very light";
   if (totalFlights <= 80) return "light";
   if (totalFlights <= 180) return "moderate";
@@ -287,6 +295,10 @@ function normalizeForDedup(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function stripBoilerplate(text: string): string {
   return text
     .replace(/\bopen official source for live details\.?/gi, "")
@@ -297,12 +309,57 @@ function stripBoilerplate(text: string): string {
     .trim();
 }
 
-function isLowValueEvidence(text: string): boolean {
-  if (!text) return true;
-  return /fetch error|challenge-protected|unavailable or non-usable|open official source/i.test(text);
+function cleanEvidenceText(text: string): string {
+  return stripBoilerplate(text)
+    .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
+    .replace(/\[[^\]]+]\(https?:\/\/[^)]+\)/g, " ")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/\b(?:url source|markdown content)\b[\s\S]*$/i, " ")
+    .replace(/\btitle:\s*/gi, "")
+    .replace(/[_=*#`>]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function selectNarrativeEvidenceRows(context: BriefInputContext, maxRows = 3): NarrativeEvidenceRow[] {
+function removeSourcePrefix(text: string, sourceName: string): string {
+  if (!text || !sourceName) return text;
+  const escaped = escapeRegExp(sourceName);
+  return text
+    .replace(new RegExp(`^${escaped}\\s*:\\s*${escaped}\\s*:\\s*`, "i"), "")
+    .replace(new RegExp(`^${escaped}\\s*:\\s*`, "i"), "")
+    .trim();
+}
+
+function pickBestEvidenceSegment(text: string): string {
+  const segments = text
+    .split(/\s+\|\s+|(?<=[.!?])\s+/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length >= 24);
+  return segments[0] ?? text;
+}
+
+function isLowValueEvidence(text: string): boolean {
+  if (!text) return true;
+  if (/fetch error|challenge-protected|unavailable or non-usable|open official source/i.test(text)) return true;
+  if (/markdown content|url source|!\[image|http[s]?:\/\//i.test(text)) return true;
+  const alphaCount = (text.match(/[a-z]/gi) ?? []).length;
+  return alphaCount < 24;
+}
+
+function buildEvidenceClause(row: BriefSourceContext): string {
+  const title = cleanEvidenceText(row.title);
+  const summary = cleanEvidenceText(row.summary);
+  const titleNoSource = removeSourcePrefix(title, row.source_name);
+  const summaryNoSource = removeSourcePrefix(summary, row.source_name);
+  const combined = [titleNoSource, summaryNoSource]
+    .filter(Boolean)
+    .filter((part, idx, arr) => arr.findIndex((candidate) => normalizeForDedup(candidate) === normalizeForDedup(part)) === idx)
+    .join(". ");
+  const picked = pickBestEvidenceSegment(combined);
+  return compact(picked, 150);
+}
+
+function selectNarrativeEvidenceRows(context: BriefInputContext, maxRows = 2): NarrativeEvidenceRow[] {
   const seen = new Set<string>();
   const rows = [...context.sources].sort((a, b) => {
     const levelDiff = statusRank(b.status_level) - statusRank(a.status_level);
@@ -314,7 +371,7 @@ function selectNarrativeEvidenceRows(context: BriefInputContext, maxRows = 3): N
 
   const out: NarrativeEvidenceRow[] = [];
   for (const row of rows) {
-    const evidenceText = stripBoilerplate(compact(`${row.title}. ${row.summary}`, 240));
+    const evidenceText = buildEvidenceClause(row);
     if (isLowValueEvidence(evidenceText)) continue;
     const key = normalizeForDedup(evidenceText);
     if (!key || seen.has(key)) continue;
@@ -339,12 +396,14 @@ function selectCorroboratedSocialRows(context: BriefInputContext, maxRows = 2): 
       const source = sourceById.get(row.source_id);
       if (!source) return null;
       if (!(source.status_level === "advisory" || source.status_level === "disrupted")) return null;
+      const cleanText = compact(cleanEvidenceText(row.text_display), 120);
+      if (isLowValueEvidence(cleanText)) return null;
       return {
         source_id: row.source_id,
         source_name: source.source_name,
         handle: row.handle,
         posted_at: row.posted_at,
-        text: compact(stripBoilerplate(row.text_display), 140),
+        text: cleanText,
         keywords: row.keywords,
         confidence: row.confidence,
       } satisfies CorroboratedSocialRow;
@@ -370,14 +429,14 @@ function buildSourceNarrativeSentence(rows: NarrativeEvidenceRow[]): string {
   if (rows.length === 0) {
     return "Official source pages currently provide limited clear narrative detail.";
   }
-  const clauses = rows.map((row) => `${row.source_name}: ${row.clause}`);
-  return `Key official updates: ${clauses.join(" | ")}.`;
+  const clauses = rows.map((row) => `${row.source_name} reports ${row.clause}`);
+  return `Key official updates: ${clauses.join("; ")}.`;
 }
 
 function buildSocialNarrativeSentence(rows: CorroboratedSocialRow[]): string {
   if (rows.length === 0) return "";
   const handles = Array.from(new Set(rows.map((row) => `@${row.handle}`)));
-  const socialTheme = rows.map((row) => row.text).join(" | ");
+  const socialTheme = rows.map((row) => row.text).join("; ");
   return `Recent official X posts from ${handles.join(", ")} corroborate the same advisory themes: ${socialTheme}.`;
 }
 
@@ -626,6 +685,31 @@ async function generateBriefParagraphWithModel(
   duration_ms: number;
 }> {
   const startedAt = Date.now();
+  const generationMode = getBriefGenerationMode();
+  if (generationMode !== "llm") {
+    logLlmTelemetry("brief_generation", {
+      route: "/api/brief/refresh",
+      mode: "current_state_brief",
+      model: null,
+      success: true,
+      duration_ms: Date.now() - startedAt,
+      fallback_reason: "extractive_policy",
+      context: {
+        source_rows: context.sources.length,
+        social_rows: context.social_signals.length,
+      },
+    });
+    return {
+      paragraph: fallbackParagraph,
+      model: null,
+      fallback_reason: "extractive_policy",
+      prompt_tokens: null,
+      completion_tokens: null,
+      total_tokens: null,
+      duration_ms: Date.now() - startedAt,
+    };
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     logLlmTelemetry("brief_generation", {
@@ -929,7 +1013,7 @@ export async function refreshCurrentStateBrief(opts?: { forceRegenerate?: boolea
     total_tokens: generation.total_tokens,
     context: {
       regenerated: true,
-      reason: generation.model ? "input_changed_regenerated_model" : "input_changed_regenerated_fallback",
+      reason: generation.model ? "input_changed_regenerated_model" : (generation.fallback_reason ?? "input_changed_regenerated_fallback"),
       generation_duration_ms: generation.duration_ms,
       source_rows: context.sources.length,
       social_rows: context.social_signals.length,

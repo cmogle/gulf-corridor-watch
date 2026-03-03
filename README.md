@@ -67,6 +67,9 @@ GPT_UPDATE_VALIDATION_MAX_PER_INGEST=20
 # optional model/timeout override for top banner briefing generation
 CURRENT_STATE_BRIEF_MODEL=gpt-4o-mini
 CURRENT_STATE_BRIEF_TIMEOUT_MS=8000
+# optional generation mode for briefing paragraph:
+# "extractive" (default, deterministic/no hallucination risk) or "llm" (model-generated)
+CURRENT_STATE_BRIEF_GENERATION_MODE=extractive
 # optional GPT context gating controls
 GPT_CONTEXT_MAX_SOURCE_AGE_MINUTES=180
 GPT_CONTEXT_MIN_FRESHNESS_MINUTES=30
@@ -122,6 +125,7 @@ npm run dev
   - includes freshness, confidence, flight summary, and coverage metadata
   - paragraph copy is source-text synthesis first (not source/feed count reporting)
   - official X is included in the paragraph only when corroborated by official advisory/disruption context
+  - default generation mode is deterministic extractive synthesis to minimize hallucination risk
 - `GET /api/brief/refresh?key=<INGEST_SECRET or BRIEF_SECRET>`
   - internal cron-triggered rebuild of the briefing
   - hash-based regeneration skips LLM calls when source inputs are unchanged

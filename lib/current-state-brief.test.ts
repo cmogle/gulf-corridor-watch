@@ -172,6 +172,7 @@ test("fallback paragraph omits x narrative when not corroborated", () => {
           source_name: "Emirates Travel Updates",
           status_level: "normal",
           reliability: "reliable",
+          validation_state: "validated",
           priority: 100,
           fetched_at: "2026-03-03T10:05:00.000Z",
           published_at: null,
@@ -189,6 +190,7 @@ test("fallback paragraph omits x narrative when not corroborated", () => {
           text_display: "General service announcement",
           keywords: [],
           confidence: 0.3,
+          validation_state: "validated",
         },
       ],
     }),
@@ -209,6 +211,32 @@ test("fallback paragraph adds short freshness caveat without numeric source coun
   );
   assert.match(paragraph, /Some official pages have not updated recently/i);
   assert.doesNotMatch(paragraph, /\b\d+\s+(official|monitored)\s+sources?\b/i);
+});
+
+test("fallback paragraph strips markdown/url artifacts from source evidence", () => {
+  const paragraph = buildFallbackBriefParagraph(
+    makeContext({
+      sources: [
+        {
+          source_id: "oman_air",
+          source_name: "Oman Air Travel Updates",
+          status_level: "advisory",
+          reliability: "reliable",
+          validation_state: "validated",
+          priority: 98,
+          fetched_at: "2026-03-03T10:06:00.000Z",
+          published_at: null,
+          freshness_target_minutes: 5,
+          title: "Oman Air Travel Updates",
+          summary:
+            "Title: Oman Air URL Source: http://www.omanair.com/om/en/travel-updates Markdown Content: Oman Air =============== ![Image 18: notification icon](http://ww...)",
+          stale: false,
+        },
+        ...makeContext().sources,
+      ],
+    }),
+  );
+  assert.doesNotMatch(paragraph, /Markdown Content|URL Source|!\[Image|http:\/\//i);
 });
 
 test("hash changes when narrative policy version changes", () => {

@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/ingest?key=@ingest_secret",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}

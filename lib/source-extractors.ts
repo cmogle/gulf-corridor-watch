@@ -1,5 +1,5 @@
-import { SourceDef } from "./sources";
-import { isUnusableSourceText, sanitizeSourceText } from "./source-quality";
+import type { SourceDef } from "./sources.ts";
+import { isUnusableSourceText, sanitizeSourceText } from "./source-quality.ts";
 
 type HtmlExtractResult = {
   title: string;
@@ -20,6 +20,20 @@ function decodeEntities(input: string): string {
     .replace(/&gt;|&#62;/gi, ">")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+
+/**
+ * Strip the structured prefix that Jina reader (r.jina.ai) prepends to markdown output.
+ * Only strips when these lines appear at the very start of the text.
+ */
+export function stripJinaPrefix(text: string): string {
+  if (!text.startsWith("Title: ")) return text;
+  const stripped = text
+    .replace(/^Title:\s*[^\n]*\n?/, "")
+    .replace(/^URL Source:\s*[^\n]*\n?/, "")
+    .replace(/^Markdown Content:\s*\n?/, "");
+  return stripped;
 }
 
 function stripHtml(input: string): string {

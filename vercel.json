@@ -1,6 +1,7 @@
 {
   "crons": [
     { "path": "/api/brief/refresh", "schedule": "*/5 * * * *" },
+    { "path": "/api/metrics/baseline", "schedule": "*/15 * * * *" },
 
     { "path": "/api/ingest/emirates_updates", "schedule": "*/5 * * * *" },
     { "path": "/api/ingest/etihad_advisory", "schedule": "*/5 * * * *" },
@@ -35,17 +36,24 @@
     { "path": "/api/ingest/gn_india_dubai_travel", "schedule": "*/15 * * * *" },
     { "path": "/api/ingest/uk_fcdo_iran", "schedule": "*/15 * * * *" },
 
+    { "path": "/api/ingest/expert-feed", "schedule": "*/30 * * * *" },
     { "path": "/api/ingest", "schedule": "*/30 * * * *" }
   ],
   "functions": {
     "app/api/ingest/[sourceId]/route.ts": {
-      "maxDuration": 120
+      "maxDuration": 60
     },
     "app/api/ingest/route.ts": {
       "maxDuration": 300
     },
+    "app/api/metrics/baseline/route.ts": {
+      "maxDuration": 60
+    },
     "app/api/chat/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/ingest/expert-feed/route.ts": {
+      "maxDuration": 120
     }
   }
 }

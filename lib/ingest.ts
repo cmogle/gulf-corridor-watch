@@ -237,6 +237,35 @@ function pickBestRssItems(items: RssItem[], maxItems = 6): RssItem[] {
   return scored.slice(0, maxItems).map((s) => s.item);
 }
 
+type ScoredRssItem = { title: string; description: string; score: number };
+
+export function formatRssSummary(items: ScoredRssItem[]): { title: string; summary: string; isBulletList: boolean } {
+  if (items.length === 0) return { title: "", summary: "", isBulletList: false };
+
+  const cleanDesc = (desc: string) => desc.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 150);
+
+  if (items.length === 1) {
+    const item = items[0];
+    return {
+      title: item.title,
+      summary: cleanDesc(item.description),
+      isBulletList: false,
+    };
+  }
+
+  const top = items.slice(0, 4);
+  const bullets = top.map((item) => {
+    const desc = cleanDesc(item.description);
+    return desc ? `- ${item.title}: ${desc}` : `- ${item.title}`;
+  });
+
+  return {
+    title: "",
+    summary: bullets.join("\n"),
+    isBulletList: true,
+  };
+}
+
 async function fetchRss(source: SourceDef): Promise<Snapshot> {
   const { text: xml, finalUrl, status } = await fetchTextWithFallback([source.url, ...getFallbackUrls(source)], "rss");
   const parsed = parser.parse(xml);

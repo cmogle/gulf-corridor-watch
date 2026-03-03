@@ -16,7 +16,11 @@ export type SourceDef = {
     | "mofa_news"
     | "visit_dubai_articles"
     | "india_mea_press"
-    | "india_boi_home";
+    | "india_boi_home"
+    | "flydubai_updates"
+    | "air_arabia_updates"
+    | "qatar_airways_updates"
+    | "gcaa_news";
   priority: number;
   freshness_target_minutes: number;
   x_handles?: string[];
@@ -183,5 +187,98 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     priority: 72,
     freshness_target_minutes: 15,
     region: "India",
+  },
+  {
+    id: "flydubai_updates",
+    name: "flydubai Travel Updates",
+    category: "airline",
+    url: "https://www.flydubai.com/en/travel-updates",
+    parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "html_title_text",
+    priority: 95,
+    freshness_target_minutes: 5,
+    x_handles: ["flydubai"],
+    region: "UAE",
+  },
+  {
+    id: "air_arabia_updates",
+    name: "Air Arabia Travel Updates",
+    category: "airline",
+    url: "https://www.airarabia.com/en/travel-alerts",
+    parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "html_title_text",
+    priority: 85,
+    freshness_target_minutes: 10,
+    x_handles: ["aaboriginal"],
+    region: "UAE",
+  },
+  {
+    id: "qatar_airways_updates",
+    name: "Qatar Airways Travel Alerts",
+    category: "airline",
+    url: "https://www.qatarairways.com/en/travel-alerts.html",
+    parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "html_title_text",
+    priority: 80,
+    freshness_target_minutes: 10,
+    region: "Qatar (transit via Doha)",
+  },
+  {
+    id: "gcaa_uae",
+    name: "UAE General Civil Aviation Authority",
+    category: "government",
+    url: "https://www.gcaa.gov.ae/en/pages/newslist.aspx",
+    parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "html_title_text",
+    priority: 96,
+    freshness_target_minutes: 5,
+    x_handles: ["ABORJALUAE"],
+    region: "UAE",
+  },
+  {
+    id: "uk_fcdo_uae",
+    name: "UK FCDO Travel Advice — UAE",
+    category: "government",
+    url: "https://www.gov.uk/foreign-travel-advice/united-arab-emirates.atom",
+    parser: "rss",
+    connector: "rss",
+    extractor_id: "rss_default",
+    priority: 75,
+    freshness_target_minutes: 15,
+    region: "UK / UAE",
+  },
+  {
+    id: "australia_dfat_uae",
+    name: "Australian DFAT SmartTraveller — UAE",
+    category: "government",
+    url: "https://www.smartraveller.gov.au/destinations/middle-east/united-arab-emirates",
+    parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "html_title_text",
+    priority: 60,
+    freshness_target_minutes: 30,
+    region: "Australia / UAE",
+  },
+  {
+    id: "canada_gac_uae",
+    name: "Canadian GAC Travel Advice — UAE",
+    category: "government",
+    url: "https://travel.gc.ca/destinations/united-arab-emirates",
+    parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "html_title_text",
+    priority: 58,
+    freshness_target_minutes: 30,
+    region: "Canada / UAE",
   },
 ];

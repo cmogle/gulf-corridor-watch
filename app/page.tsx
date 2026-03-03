@@ -1,15 +1,20 @@
+import { getFeedBackend } from "@/lib/feed-backend";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { isUsableSnapshot } from "@/lib/source-quality";
+import { loadTrustedFeed, loadTrustedSourceHealth } from "@/lib/trusted-feed-repo";
 import { loadUnifiedFeed } from "@/lib/unified-updates";
 import { loadCurrentStateBrief } from "@/lib/current-state-brief";
 import { StatusHero } from "@/app/components/status-hero";
 import { SituationBriefing } from "@/app/components/situation-briefing";
 import { FlightPulse } from "@/app/components/flight-pulse";
 import { UpdatesFeed } from "@/app/components/updates-feed";
+import { TrustedUpdatesFeedV2 } from "@/app/components/trusted-updates-feed-v2";
+import { SourceHealthV2 } from "@/app/components/source-health-v2";
 import { MyTrackingPanel } from "@/app/components/my-tracking-panel";
 import { ResourcesPanel } from "@/app/components/resources-panel";
 import { AirspacePulseAtlas } from "@/app/components/pulse-atlas";
 import { SourceHealth } from "@/app/components/source-health";
+import { ExpertAnalysisPanel } from "@/app/components/expert-analysis-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -155,6 +160,30 @@ function suppressionReason(row: Row) {
 }
 
 export default async function Home() {
+  if (getFeedBackend() === "v2") {
+    const [initialUpdates, initialHealth] = await Promise.all([
+      loadTrustedFeed(80).catch(() => []),
+      loadTrustedSourceHealth().catch(() => []),
+    ]);
+
+    return (
+      <main className="min-h-screen bg-[var(--surface-light)]">
+        <section className="bg-[var(--surface-dark)] px-4 py-10 md:px-8">
+          <div className="mx-auto max-w-5xl">
+            <p className="text-[12px] font-medium uppercase tracking-[0.2em] text-[var(--text-on-dark-muted)]">Trusted Feed v2</p>
+            <h1 className="mt-2 font-serif text-4xl text-[var(--text-on-dark)]">Gulf Corridor Watch</h1>
+            <p className="mt-3 max-w-3xl text-sm text-[var(--text-on-dark-muted)]">
+              Strict publish mode is active. Only machine-qualified official updates are shown. Degraded or failed source runs are visible in Source Health.
+            </p>
+          </div>
+        </section>
+
+        <TrustedUpdatesFeedV2 initialItems={initialUpdates} />
+        <SourceHealthV2 initialItems={initialHealth} />
+      </main>
+    );
+  }
+
   const currentBrief = await loadCurrentStateBrief({ allowTransient: true }).catch(() => null);
   const rows = await loadRows();
   const usableRows = rows.filter((row) => isUsableSnapshot({ title: row.title, summary: row.summary, reliability: row.reliability }));
@@ -198,6 +227,8 @@ export default async function Home() {
       <FlightPulse byAirport={pulse.byAirport} topRoutes={pulse.topRoutes} />
 
       <UpdatesFeed initialItems={initialUpdates} />
+
+      <ExpertAnalysisPanel />
 
       <div className="mx-auto max-w-4xl px-4 py-4 md:px-0">
         <MyTrackingPanel />

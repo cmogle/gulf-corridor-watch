@@ -55,12 +55,11 @@ export async function POST(req: Request) {
         {
           role: "system",
           content:
-            "You are a flight operations assistant. Use only the provided cached dataset summary and rows. Keep response concise, explicit about uncertainty, and include latest fetch timestamp.",
+            "You are a flight operations assistant. Use only the provided dataset summary and rows. Keep response concise, explicit about uncertainty, and include latest fetch timestamp.",
         },
         {
           role: "user",
           content: `Question: ${query}
-Data source: ${result.source}
 Summary: total=${result.summary.total}, delayed=${result.summary.delayed}, cancelled=${result.summary.cancelled}, latest_fetch=${result.summary.latest_fetch ?? "n/a"}
 Insight: ${result.insight ? `${result.insight.headline} | ${result.insight.summary} | confidence=${result.insight.confidence}` : "n/a"}
 Rows:

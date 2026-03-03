@@ -41,23 +41,24 @@ type QueryResponse = {
   };
 };
 
-const SUGGESTED_PROMPTS = [
-  "Status of EK511",
-  "DXB -> DEL delayed now",
-  "AUH -> BOM delayed now",
-  "What is the likelihood of getting back to Dubai from Dublin in the next 48 hours?",
-];
+type FlightSearchWidgetProps = {
+  suggestedPrompts?: string[];
+  latestFetch?: string | null;
+};
 
-export function FlightSearchWidget() {
+export function FlightSearchWidget({ suggestedPrompts = [], latestFetch = null }: FlightSearchWidgetProps) {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<QueryResponse | null>(null);
-  const [allowLive, setAllowLive] = useState(false);
+  const [useExpandedLookup, setUseExpandedLookup] = useState(false);
+  const [showExpandedLookup, setShowExpandedLookup] = useState(false);
   const [trackNotice, setTrackNotice] = useState<string | null>(null);
+  const canSummarize = Boolean(data?.ok && (data.summary?.total ?? 0) > 0);
 
-  async function submit(mode: "structured_only" | "explain") {
+  async function submit(mode: "structured_only" | "explain", useLiveOverride?: boolean) {
     const trimmed = query.trim();
     if (!trimmed) return;
+    const allowLive = useLiveOverride ?? useExpandedLookup;
     setLoading(true);
     setData(null);
 
@@ -68,6 +69,12 @@ export function FlightSearchWidget() {
     });
     const json = (await res.json()) as QueryResponse;
     setData(json);
+    if (json.ok && (json.summary?.total ?? 0) === 0 && !allowLive) {
+      setShowExpandedLookup(true);
+    } else if (json.ok) {
+      setShowExpandedLookup(false);
+    }
+    if (allowLive) setUseExpandedLookup(true);
     setLoading(false);
   }
 
@@ -109,24 +116,37 @@ export function FlightSearchWidget() {
     <section className="rounded-xl border border-zinc-300 bg-white/90 p-4 space-y-3 shadow-[0_8px_30px_rgba(16,38,54,0.08)]">
       <div className="space-y-2">
         <h3 className="text-base font-semibold tracking-tight">Ask Flight Agent</h3>
-        <p className="text-xs text-zinc-600">Cache-first responses from Supabase for speed and low API cost.</p>
-        <div className="flex flex-wrap gap-2">
-          {SUGGESTED_PROMPTS.map((prompt) => (
-            <button
-              key={prompt}
-              onClick={() => setQuery(prompt)}
-              className="rounded-full border border-zinc-300 bg-zinc-50 px-3 py-1 text-xs text-zinc-700 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-700"
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
+        <p className="text-xs text-zinc-600">
+          Results use the latest available flight data. Last updated:{" "}
+          {latestFetch ? new Date(latestFetch).toLocaleString() : "n/a"}
+        </p>
+        {suggestedPrompts.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {suggestedPrompts.map((prompt) => (
+              <button
+                key={prompt}
+                onClick={() => setQuery(prompt)}
+                className="rounded-full border border-zinc-300 bg-zinc-50 px-3 py-1 text-xs text-zinc-700 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-700"
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-600">No route suggestions yet. Run Quick Check to load current activity first.</p>
+        )}
       </div>
 
       <div className="flex flex-col gap-2">
         <textarea
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setData(null);
+            setTrackNotice(null);
+            setUseExpandedLookup(false);
+            setShowExpandedLookup(false);
+          }}
           placeholder="Flight number, route, or question..."
           className="min-h-24 w-full rounded-lg border border-zinc-400 bg-white px-3 py-2 text-sm outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-zinc-700"
           aria-label="Flight query"
@@ -139,22 +159,15 @@ export function FlightSearchWidget() {
           >
             {loading ? "Checking..." : "Quick Check"}
           </button>
-          <button
-            onClick={() => void submit("explain")}
-            disabled={loading || !query.trim()}
-            className="rounded-lg border border-zinc-500 bg-white px-4 py-2 text-sm font-medium text-zinc-900 outline-none ring-offset-2 transition hover:bg-zinc-100 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-zinc-700"
-          >
-            Explain with AI
-          </button>
-          <label className="ml-auto flex items-center gap-2 text-xs text-zinc-600">
-            <input
-              type="checkbox"
-              checked={allowLive}
-              onChange={(e) => setAllowLive(e.target.checked)}
-              className="h-4 w-4 rounded border-zinc-400"
-            />
-            Allow live fallback
-          </label>
+          {canSummarize ? (
+            <button
+              onClick={() => void submit("explain")}
+              disabled={loading || !query.trim()}
+              className="rounded-lg border border-zinc-500 bg-white px-4 py-2 text-sm font-medium text-zinc-900 outline-none ring-offset-2 transition hover:bg-zinc-100 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-zinc-700"
+            >
+              Summarize Data
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -173,7 +186,9 @@ export function FlightSearchWidget() {
           <div className="rounded-lg border border-zinc-300 bg-white p-2 text-xs">Flights: {data.summary.total}</div>
           <div className="rounded-lg border border-zinc-300 bg-white p-2 text-xs text-amber-700">Delayed: {data.summary.delayed}</div>
           <div className="rounded-lg border border-zinc-300 bg-white p-2 text-xs text-red-700">Cancelled: {data.summary.cancelled}</div>
-          <div className="rounded-lg border border-zinc-300 bg-white p-2 text-xs text-zinc-700">Source: {data.source ?? "n/a"}</div>
+          <div className="rounded-lg border border-zinc-300 bg-white p-2 text-xs text-zinc-700">
+            Last updated: {data.summary.latest_fetch ? new Date(data.summary.latest_fetch).toLocaleTimeString() : "n/a"}
+          </div>
           {trackIntent ? (
             <button onClick={handleTrack} className="rounded-lg border border-zinc-500 bg-white p-2 text-xs font-medium hover:bg-zinc-100">
               {trackIntent.kind === "flight" ? "Track this flight" : "Track this route"}
@@ -198,6 +213,20 @@ export function FlightSearchWidget() {
           ))}
         </ul>
       )}
+
+      {showExpandedLookup ? (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+          <p>No recent match found in the current dataset.</p>
+          <button
+            onClick={() => void submit("structured_only", true)}
+            disabled={loading}
+            className="mt-2 rounded-md border border-amber-600 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+          >
+            Try Wider Lookup
+          </button>
+          <p className="mt-1 text-[11px] text-amber-800">This may take longer and can increase API usage.</p>
+        </div>
+      ) : null}
 
       {data && !data.ok && <p className="text-xs text-red-700">{data.error ?? "Failed to run flight query."}</p>}
     </section>

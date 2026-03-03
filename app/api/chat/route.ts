@@ -33,13 +33,12 @@ export async function POST(req: Request) {
           {
             role: "system",
             content:
-              "You are a flight operations assistant. Answer only from provided cached flight data and insight summary. If data is missing or stale, say so clearly. Always include the latest fetched timestamp and source basis (cache/live).",
+              "You are a flight operations assistant. Answer only from provided flight data and insight summary. If data is missing or stale, say so clearly. Always include the latest fetched timestamp.",
           },
           {
             role: "user",
             content: `Question: ${question}
 
-Result source: ${result.source}
 Summary: total=${result.summary.total}, delayed=${result.summary.delayed}, cancelled=${result.summary.cancelled}, latest_fetch=${result.summary.latest_fetch ?? "n/a"}
 Insight: ${result.insight ? `${result.insight.headline} | ${result.insight.summary} | confidence=${result.insight.confidence} | score=${result.insight.score ?? "n/a"}` : "n/a"}
 

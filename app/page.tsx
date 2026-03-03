@@ -70,6 +70,23 @@ type FlightPulse = {
   latestFetch: string | null;
 };
 
+function buildFlightPromptSuggestions(pulse: FlightPulse): string[] {
+  if (!pulse.latestFetch || pulse.topRoutes.length === 0) return [];
+
+  const prompts: string[] = [];
+  for (const item of pulse.topRoutes.slice(0, 3)) {
+    prompts.push(`${item.route} delayed now`);
+    const routeMatch = item.route.match(/^([A-Z]{3}) -> ([A-Z]{3})$/);
+    if (routeMatch) {
+      const origin = routeMatch[1];
+      const destination = routeMatch[2];
+      prompts.push(`What is the likelihood of getting from ${origin} to ${destination} in the next 24 hours?`);
+    }
+  }
+
+  return Array.from(new Set(prompts)).slice(0, 4);
+}
+
 async function loadRows(): Promise<Row[]> {
   try {
     const supabase = getSupabaseAdmin();
@@ -228,6 +245,7 @@ export default async function Home({ searchParams }: HomeProps) {
   const usableRows = rows.filter((row) => isUsableSnapshot({ title: row.title, summary: row.summary, reliability: row.reliability }));
   const suppressedRows = rows.filter((row) => !isUsableSnapshot({ title: row.title, summary: row.summary, reliability: row.reliability }));
   const pulse = await loadFlightPulse();
+  const suggestedFlightPrompts = buildFlightPromptSuggestions(pulse);
   const socialSignals = await loadSocialSignals();
   const initialUpdates = await loadUnifiedFeed(80).catch(() => []);
   const advisories = usableRows.filter((r) => r.status_level === "advisory" || r.status_level === "disrupted").length;
@@ -252,12 +270,12 @@ export default async function Home({ searchParams }: HomeProps) {
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold tracking-tight">Flight-First Query</h2>
-              <p className="text-sm text-zinc-700">Ask by flight, route, or scenario. Default response path is Supabase cache for speed and low cost.</p>
+              <p className="text-sm text-zinc-700">Ask by flight, route, or scenario. Results include latest known status and last update time.</p>
             </div>
             <p className="text-xs text-zinc-600">Latest fetch: {pulse.latestFetch ? new Date(pulse.latestFetch).toLocaleString() : "n/a"}</p>
           </div>
 
-          <FlightSearchWidget />
+          <FlightSearchWidget suggestedPrompts={suggestedFlightPrompts} latestFetch={pulse.latestFetch} />
 
           <div className="rounded-xl border border-zinc-300 bg-white/80 p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">

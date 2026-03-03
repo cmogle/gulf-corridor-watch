@@ -112,6 +112,8 @@ npm run dev
 - `GET /api/brief/current`
   - returns the latest persisted paragraph (or transient fallback when first-run data is not persisted yet)
   - includes freshness, confidence, flight summary, and coverage metadata
+  - paragraph copy is source-text synthesis first (not source/feed count reporting)
+  - official X is included in the paragraph only when corroborated by official advisory/disruption context
 - `GET /api/brief/refresh?key=<INGEST_SECRET or BRIEF_SECRET>`
   - internal cron-triggered rebuild of the briefing
   - hash-based regeneration skips LLM calls when source inputs are unchanged

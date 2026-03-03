@@ -5,6 +5,7 @@ const BRIEF_KEY = "global";
 const DEFAULT_MODEL = "gpt-4o-mini";
 const DEFAULT_TIMEOUT_MS = 8000;
 const EXPECTED_MISSING_SOURCES = ["india_consulate_dubai", "india_embassy_abu_dhabi", "broader_mena_ministries"];
+export const NARRATIVE_POLICY_VERSION = "v2_text_first_no_source_counts";
 
 export type BriefFreshnessState = "fresh" | "mixed" | "stale";
 export type BriefConfidence = "high" | "medium" | "low";
@@ -36,6 +37,7 @@ type BriefSourceContext = {
   source_name: string;
   status_level: "normal" | "advisory" | "disrupted" | "unknown";
   reliability: "reliable" | "degraded" | "blocked";
+  priority: number;
   fetched_at: string;
   published_at: string | null;
   freshness_target_minutes: number;
@@ -74,6 +76,7 @@ type SnapshotRow = {
   source_name: string;
   status_level: "normal" | "advisory" | "disrupted" | "unknown";
   reliability: "reliable" | "degraded" | "blocked";
+  priority: number;
   fetched_at: string;
   published_at: string | null;
   freshness_target_minutes: number;
@@ -110,6 +113,30 @@ type PersistedBriefRow = {
   flight_summary: unknown;
   coverage: unknown;
   sources_used: unknown;
+};
+
+type NarrativeEvidenceRow = {
+  source_id: string;
+  source_name: string;
+  status_level: BriefSourceContext["status_level"];
+  fetched_at: string;
+  clause: string;
+};
+
+type CorroboratedSocialRow = {
+  source_id: string;
+  source_name: string;
+  handle: string;
+  posted_at: string;
+  text: string;
+  keywords: string[];
+  confidence: number;
+};
+
+type NarrativeBasis = {
+  source_evidence_rows: NarrativeEvidenceRow[];
+  corroborated_social_rows: CorroboratedSocialRow[];
+  freshness_caveat_required: boolean;
 };
 
 async function getSupabaseAdminClient() {
@@ -187,8 +214,9 @@ function stableArray<T>(rows: T[], keyFn: (row: T) => string): T[] {
   return [...rows].sort((a, b) => keyFn(a).localeCompare(keyFn(b)));
 }
 
-export function computeBriefInputHash(input: BriefInputContext): string {
+export function computeBriefInputHashForPolicy(input: BriefInputContext, narrativePolicyVersion: string): string {
   const normalized = {
+    narrative_policy_version: narrativePolicyVersion,
     freshness_state: input.freshness_state,
     confidence: input.confidence,
     flight: {
@@ -204,6 +232,7 @@ export function computeBriefInputHash(input: BriefInputContext): string {
       source_id: row.source_id,
       status_level: row.status_level,
       reliability: row.reliability,
+      priority: row.priority,
       fetched_at: row.fetched_at,
       published_at: row.published_at,
       freshness_target_minutes: row.freshness_target_minutes,
@@ -223,6 +252,10 @@ export function computeBriefInputHash(input: BriefInputContext): string {
   return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
 }
 
+export function computeBriefInputHash(input: BriefInputContext): string {
+  return computeBriefInputHashForPolicy(input, NARRATIVE_POLICY_VERSION);
+}
+
 export function extractBriefJsonObject(text: string): string {
   const trimmed = text.trim();
   if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed;
@@ -231,36 +264,143 @@ export function extractBriefJsonObject(text: string): string {
   return match[0];
 }
 
-function summarySignals(context: BriefInputContext) {
-  const advisorySources = context.sources.filter((row) => row.status_level === "advisory" || row.status_level === "disrupted").length;
-  const unknownSources = context.sources.filter((row) => row.status_level === "unknown").length;
-  const xWithKeywords = context.social_signals.filter((row) => row.keywords.length > 0).length;
-  return { advisorySources, unknownSources, xWithKeywords };
+function statusRank(level: BriefSourceContext["status_level"]): number {
+  if (level === "disrupted") return 3;
+  if (level === "advisory") return 2;
+  if (level === "unknown") return 1;
+  return 0;
+}
+
+function normalizeForDedup(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function stripBoilerplate(text: string): string {
+  return text
+    .replace(/\bopen official source for live details\.?/gi, "")
+    .replace(/\bsource currently blocked or challenge-protected\.?/gi, "")
+    .replace(/\bsource fetch failed during ingestion\.?/gi, "")
+    .replace(/\bsource page content was unavailable or non-usable in this fetch\.?/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isLowValueEvidence(text: string): boolean {
+  if (!text) return true;
+  return /fetch error|challenge-protected|unavailable or non-usable|open official source/i.test(text);
+}
+
+function selectNarrativeEvidenceRows(context: BriefInputContext, maxRows = 3): NarrativeEvidenceRow[] {
+  const seen = new Set<string>();
+  const rows = [...context.sources].sort((a, b) => {
+    const levelDiff = statusRank(b.status_level) - statusRank(a.status_level);
+    if (levelDiff !== 0) return levelDiff;
+    const priorityDiff = b.priority - a.priority;
+    if (priorityDiff !== 0) return priorityDiff;
+    return toMillis(b.fetched_at) - toMillis(a.fetched_at);
+  });
+
+  const out: NarrativeEvidenceRow[] = [];
+  for (const row of rows) {
+    const evidenceText = stripBoilerplate(compact(`${row.title}. ${row.summary}`, 240));
+    if (isLowValueEvidence(evidenceText)) continue;
+    const key = normalizeForDedup(evidenceText);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      source_id: row.source_id,
+      source_name: row.source_name,
+      status_level: row.status_level,
+      fetched_at: row.fetched_at,
+      clause: compact(evidenceText, 180),
+    });
+    if (out.length >= maxRows) break;
+  }
+  return out;
+}
+
+function selectCorroboratedSocialRows(context: BriefInputContext, maxRows = 2): CorroboratedSocialRow[] {
+  const sourceById = new Map(context.sources.map((row) => [row.source_id, row]));
+  return context.social_signals
+    .filter((row) => row.keywords.length > 0)
+    .map((row) => {
+      const source = sourceById.get(row.source_id);
+      if (!source) return null;
+      if (!(source.status_level === "advisory" || source.status_level === "disrupted")) return null;
+      return {
+        source_id: row.source_id,
+        source_name: source.source_name,
+        handle: row.handle,
+        posted_at: row.posted_at,
+        text: compact(stripBoilerplate(row.text_display), 140),
+        keywords: row.keywords,
+        confidence: row.confidence,
+      } satisfies CorroboratedSocialRow;
+    })
+    .filter((row): row is CorroboratedSocialRow => Boolean(row))
+    .sort((a, b) => {
+      const confidenceDiff = b.confidence - a.confidence;
+      if (confidenceDiff !== 0) return confidenceDiff;
+      return toMillis(b.posted_at) - toMillis(a.posted_at);
+    })
+    .slice(0, maxRows);
+}
+
+function buildNarrativeBasis(context: BriefInputContext): NarrativeBasis {
+  return {
+    source_evidence_rows: selectNarrativeEvidenceRows(context),
+    corroborated_social_rows: selectCorroboratedSocialRows(context),
+    freshness_caveat_required: context.coverage.stale_sources.length > 0 || context.flight.stale,
+  };
+}
+
+function buildSourceNarrativeSentence(rows: NarrativeEvidenceRow[]): string {
+  if (rows.length === 0) {
+    return "Official source pages currently provide limited clear narrative detail.";
+  }
+  const clauses = rows.map((row) => `${row.source_name}: ${row.clause}`);
+  return `Key official updates: ${clauses.join(" | ")}.`;
+}
+
+function buildSocialNarrativeSentence(rows: CorroboratedSocialRow[]): string {
+  if (rows.length === 0) return "";
+  const handles = Array.from(new Set(rows.map((row) => `@${row.handle}`)));
+  const socialTheme = rows.map((row) => row.text).join(" | ");
+  return `Recent official X posts from ${handles.join(", ")} corroborate the same advisory themes: ${socialTheme}.`;
+}
+
+function buildFreshnessCaveat(shouldInclude: boolean): string {
+  if (!shouldInclude) return "";
+  return "Some official pages have not updated recently; verify source links directly for the latest notice.";
+}
+
+export function isNarrativePolicyCompliant(paragraph: string, opts: { allowXMention: boolean }): boolean {
+  const bannedPatterns = [
+    /\bmonitored sources?\b/i,
+    /\bmonitored feeds?\b/i,
+    /\b\d+\s+of\s+\d+\s+sources?\b/i,
+    /\bdisruption-related language\b/i,
+    /\badvisory\/disrupted language\b/i,
+    /\b\d+\s+(official|monitored)\s+(sources|feeds)\b/i,
+  ];
+  if (bannedPatterns.some((pattern) => pattern.test(paragraph))) return false;
+  if (!opts.allowXMention && (/\bX posts?\b/i.test(paragraph) || /@\w+/.test(paragraph))) return false;
+  return true;
 }
 
 export function buildFallbackBriefParagraph(context: BriefInputContext): string {
-  const { advisorySources, unknownSources, xWithKeywords } = summarySignals(context);
-  const staleCount = context.coverage.stale_sources.length;
-  const sourceCount = context.sources.length;
-  const xCount = context.social_signals.length;
+  const basis = buildNarrativeBasis(context);
   const flightPhrase =
     context.flight.total > 0
       ? `${context.flight.total} tracked flights in the last 45 minutes (${context.flight.delayed} delayed, ${context.flight.cancelled} cancelled)`
       : "limited current flight telemetry";
-  const xPhrase =
-    xCount === 0
-      ? "No recent official X posts are currently available."
-      : xWithKeywords > 0
-        ? `Latest official X activity flags relevant advisory updates in ${xWithKeywords} monitored feeds.`
-        : "Latest official X posts align with website updates and do not indicate a broader new disruption.";
-  const stalePhrase =
-    staleCount === 0
-      ? "All monitored sources are updating within expected windows."
-      : staleCount > sourceCount / 2
-        ? `${staleCount} of ${sourceCount} monitored sources have older updates and should be rechecked on the next ingest cycle.`
-        : `${staleCount} monitored sources currently have older updates and may lag until the next ingest cycle.`;
-
-  return `As of ${formatDubaiTime(context.computed_at)}, regional air traffic around DXB/AUH appears ${trafficLevel(context.flight.total)}, with ${flightPhrase}. Across ${sourceCount} monitored official sources, ${advisorySources} currently show active advisories or disruptions${unknownSources > 0 ? ` and ${unknownSources} have unclear status` : ""}. ${xPhrase} ${stalePhrase}`;
+  const sourceNarrative = buildSourceNarrativeSentence(basis.source_evidence_rows);
+  const socialNarrative = buildSocialNarrativeSentence(basis.corroborated_social_rows);
+  const freshnessCaveat = buildFreshnessCaveat(basis.freshness_caveat_required);
+  return compact(
+    `As of ${formatDubaiTime(context.computed_at)}, regional air traffic around DXB/AUH appears ${trafficLevel(context.flight.total)}, with ${flightPhrase}. ${sourceNarrative} ${socialNarrative} ${freshnessCaveat}`,
+    1200,
+  );
 }
 
 function normalizeFlightSummary(value: unknown): CurrentStateBrief["flight"] {
@@ -305,7 +445,7 @@ export async function buildBriefInputContext(): Promise<BriefInputContext> {
     await Promise.all([
       supabase
         .from("latest_source_snapshots")
-        .select("source_id,source_name,status_level,reliability,fetched_at,published_at,freshness_target_minutes,title,summary")
+        .select("source_id,source_name,status_level,reliability,priority,fetched_at,published_at,freshness_target_minutes,title,summary")
         .limit(150),
       supabase
         .from("social_signals")
@@ -331,6 +471,7 @@ export async function buildBriefInputContext(): Promise<BriefInputContext> {
         source_name: row.source_name,
         status_level: row.status_level,
         reliability: row.reliability,
+        priority: Number(row.priority ?? 0) || 0,
         fetched_at: row.fetched_at,
         published_at: row.published_at,
         freshness_target_minutes: row.freshness_target_minutes,
@@ -395,9 +536,10 @@ export async function buildBriefInputContext(): Promise<BriefInputContext> {
 async function generateBriefParagraphWithModel(
   context: BriefInputContext,
   fallbackParagraph: string,
-): Promise<{ paragraph: string; model: string | null }> {
+  basis: NarrativeBasis,
+): Promise<{ paragraph: string; model: string | null; fallback_reason: string | null }> {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return { paragraph: fallbackParagraph, model: null };
+  if (!apiKey) return { paragraph: fallbackParagraph, model: null, fallback_reason: "missing_openai_api_key" };
 
   const timeoutMs = parsePositiveInt(process.env.CURRENT_STATE_BRIEF_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
   const model = process.env.CURRENT_STATE_BRIEF_MODEL?.trim() || DEFAULT_MODEL;
@@ -415,20 +557,6 @@ async function generateBriefParagraphWithModel(
         fetched_at: row.fetched_at,
         summary: compact(`${row.title}. ${row.summary}`, 180),
       }));
-    const sourceStatusRows = context.sources.slice(0, 10).map((row) => ({
-      source: row.source_name,
-      status_level: row.status_level,
-      reliability: row.reliability,
-      stale: row.stale,
-    }));
-    const socialRows = context.social_signals.slice(0, 6).map((row) => ({
-      source_id: row.source_id,
-      handle: row.handle,
-      posted_at: row.posted_at,
-      keywords: row.keywords,
-      text: compact(row.text_display, 140),
-    }));
-
     const completion = await client.chat.completions.create(
       {
         model,
@@ -437,20 +565,19 @@ async function generateBriefParagraphWithModel(
           {
             role: "system",
             content:
-              "You synthesize transport and official advisory context. Output strict JSON only: {\"paragraph\": string}. Requirements: one concise English paragraph (70-110 words), include air-traffic state, official-source narrative, and official X alignment. No speculation, no policy advice, no bullet points. Use plain language and avoid meta phrasing like 'language mentions'. If coverage is older, state that in user-friendly terms.",
+              "You synthesize transport and official advisory context. Output strict JSON only: {\"paragraph\": string}. Requirements: one concise English paragraph (70-110 words), include air-traffic state with operational flight counts, and summarize underlying official-source text snippets. Do not include source/feed quantification or source count language. Mention official X only when corroborated_social_rows are provided. No speculation, no policy advice, no bullet points. If freshness_caveat_required is true, include one short plain-language caveat.",
           },
           {
             role: "user",
             content: JSON.stringify(
               {
+                narrative_policy_version: NARRATIVE_POLICY_VERSION,
                 timestamp_gst: formatDubaiTime(context.computed_at),
-                freshness_state: context.freshness_state,
-                confidence: context.confidence,
                 flight: context.flight,
-                source_status_rows: sourceStatusRows,
+                source_evidence_rows: basis.source_evidence_rows,
+                corroborated_social_rows: basis.corroborated_social_rows,
+                freshness_caveat_required: basis.freshness_caveat_required,
                 advisory_rows: advisoryRows,
-                social_rows: socialRows,
-                coverage: context.coverage,
               },
               null,
               2,
@@ -464,10 +591,13 @@ async function generateBriefParagraphWithModel(
     const content = completion.choices[0]?.message?.content ?? "";
     const parsed = JSON.parse(extractBriefJsonObject(content)) as { paragraph?: unknown };
     const paragraph = typeof parsed.paragraph === "string" ? compact(parsed.paragraph, 1200) : "";
-    if (!paragraph) return { paragraph: fallbackParagraph, model: null };
-    return { paragraph, model };
+    if (!paragraph) return { paragraph: fallbackParagraph, model: null, fallback_reason: "empty_or_invalid_model_output" };
+    if (!isNarrativePolicyCompliant(paragraph, { allowXMention: basis.corroborated_social_rows.length > 0 })) {
+      return { paragraph: fallbackParagraph, model: null, fallback_reason: "policy_non_compliant_output" };
+    }
+    return { paragraph, model, fallback_reason: null };
   } catch {
-    return { paragraph: fallbackParagraph, model: null };
+    return { paragraph: fallbackParagraph, model: null, fallback_reason: "model_request_failed" };
   } finally {
     clearTimeout(timer);
   }
@@ -528,11 +658,15 @@ export async function refreshCurrentStateBrief(opts?: { forceRegenerate?: boolea
     return { item: rowToBrief(updated as PersistedBriefRow), regenerated: false, reason: "unchanged_input_hash" };
   }
 
+  const basis = buildNarrativeBasis(context);
   const fallbackParagraph = buildFallbackBriefParagraph(context);
-  const generation = await generateBriefParagraphWithModel(context, fallbackParagraph);
+  const generation = await generateBriefParagraphWithModel(context, fallbackParagraph, basis);
   const generatedAt = nowIso;
 
   const sourcesUsed = {
+    narrative_policy_version: NARRATIVE_POLICY_VERSION,
+    narrative_basis: basis.source_evidence_rows,
+    social_basis: basis.corroborated_social_rows,
     snapshots: context.sources.map((row) => ({
       source_id: row.source_id,
       source_name: row.source_name,
@@ -575,6 +709,6 @@ export async function refreshCurrentStateBrief(opts?: { forceRegenerate?: boolea
   return {
     item: rowToBrief(saved as PersistedBriefRow),
     regenerated: true,
-    reason: generation.model ? "input_changed_regenerated_model" : "input_changed_regenerated_fallback",
+    reason: generation.model ? "input_changed_regenerated_model" : (generation.fallback_reason ?? "input_changed_regenerated_fallback"),
   };
 }

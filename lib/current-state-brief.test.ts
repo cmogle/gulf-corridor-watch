@@ -3,9 +3,12 @@ import test from "node:test";
 import {
   buildFallbackBriefParagraph,
   computeBriefInputHash,
+  computeBriefInputHashForPolicy,
   deriveBriefFreshnessState,
   extractBriefJsonObject,
   isSourceStale,
+  isNarrativePolicyCompliant,
+  NARRATIVE_POLICY_VERSION,
   type BriefInputContext,
 } from "./current-state-brief.ts";
 
@@ -32,6 +35,7 @@ function makeContext(overrides?: Partial<BriefInputContext>): BriefInputContext 
         source_name: "Emirates Travel Updates",
         status_level: "normal",
         reliability: "reliable",
+        priority: 100,
         fetched_at: "2026-03-03T10:05:00.000Z",
         published_at: null,
         freshness_target_minutes: 5,
@@ -44,6 +48,7 @@ function makeContext(overrides?: Partial<BriefInputContext>): BriefInputContext 
         source_name: "Etihad Travel Alerts",
         status_level: "advisory",
         reliability: "reliable",
+        priority: 98,
         fetched_at: "2026-03-03T10:04:00.000Z",
         published_at: null,
         freshness_target_minutes: 5,
@@ -116,6 +121,83 @@ test("fallback paragraph avoids technical phrasing around language mentions", ()
   const paragraph = buildFallbackBriefParagraph(makeContext());
   assert.doesNotMatch(paragraph, /advisory\/disrupted language/i);
   assert.doesNotMatch(paragraph, /disruption-related language/i);
+});
+
+test("fallback paragraph is evidence-first and omits source/feed counts", () => {
+  const paragraph = buildFallbackBriefParagraph(makeContext());
+  assert.match(paragraph, /Key official updates:/i);
+  assert.match(paragraph, /Minor delay notice/i);
+  assert.doesNotMatch(paragraph, /monitored sources?|monitored feeds?/i);
+  assert.doesNotMatch(paragraph, /\b\d+\s+of\s+\d+\s+sources?\b/i);
+});
+
+test("fallback paragraph keeps flight operational numbers", () => {
+  const paragraph = buildFallbackBriefParagraph(makeContext());
+  assert.match(paragraph, /32 tracked flights in the last 45 minutes/i);
+  assert.match(paragraph, /2 delayed/i);
+  assert.match(paragraph, /0 cancelled/i);
+});
+
+test("fallback paragraph omits x narrative when not corroborated", () => {
+  const paragraph = buildFallbackBriefParagraph(
+    makeContext({
+      sources: [
+        {
+          source_id: "emirates_updates",
+          source_name: "Emirates Travel Updates",
+          status_level: "normal",
+          reliability: "reliable",
+          priority: 100,
+          fetched_at: "2026-03-03T10:05:00.000Z",
+          published_at: null,
+          freshness_target_minutes: 5,
+          title: "Travel updates",
+          summary: "All operations normal",
+          stale: false,
+        },
+      ],
+      social_signals: [
+        {
+          source_id: "emirates_updates",
+          handle: "emirates",
+          posted_at: "2026-03-03T10:02:00.000Z",
+          text_display: "General service announcement",
+          keywords: [],
+          confidence: 0.3,
+        },
+      ],
+    }),
+  );
+  assert.doesNotMatch(paragraph, /Recent official X posts/i);
+  assert.doesNotMatch(paragraph, /@emirates/i);
+});
+
+test("fallback paragraph adds short freshness caveat without numeric source counts", () => {
+  const paragraph = buildFallbackBriefParagraph(
+    makeContext({
+      coverage: {
+        sources_included: ["emirates_updates", "etihad_advisory"],
+        stale_sources: ["emirates_updates"],
+        missing_expected: [],
+      },
+    }),
+  );
+  assert.match(paragraph, /Some official pages have not updated recently/i);
+  assert.doesNotMatch(paragraph, /\b\d+\s+(official|monitored)\s+sources?\b/i);
+});
+
+test("hash changes when narrative policy version changes", () => {
+  const base = makeContext();
+  const current = computeBriefInputHash(base);
+  const legacy = computeBriefInputHashForPolicy(base, "v1");
+  assert.notEqual(current, legacy);
+  assert.equal(current, computeBriefInputHashForPolicy(base, NARRATIVE_POLICY_VERSION));
+});
+
+test("policy compliance rejects source/feed count phrasing and disallowed x mentions", () => {
+  assert.equal(isNarrativePolicyCompliant("Across 11 monitored official sources, two are stale.", { allowXMention: true }), false);
+  assert.equal(isNarrativePolicyCompliant("Recent official X posts from @etihad align with advisories.", { allowXMention: false }), false);
+  assert.equal(isNarrativePolicyCompliant("Regional air traffic is light and official updates indicate localized delays.", { allowXMention: false }), true);
 });
 
 test("json extraction handles markdown code fences", () => {

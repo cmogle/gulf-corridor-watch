@@ -67,6 +67,13 @@ GPT_UPDATE_VALIDATION_MAX_PER_INGEST=20
 # optional model/timeout override for top banner briefing generation
 CURRENT_STATE_BRIEF_MODEL=gpt-4o-mini
 CURRENT_STATE_BRIEF_TIMEOUT_MS=8000
+# optional GPT context gating controls
+GPT_CONTEXT_MAX_SOURCE_AGE_MINUTES=180
+GPT_CONTEXT_MIN_FRESHNESS_MINUTES=30
+GPT_CONTEXT_FRESHNESS_MULTIPLIER=3
+GPT_CONTEXT_MAX_SOURCES=12
+GPT_CONTEXT_MAX_SOCIAL_AGE_MINUTES=240
+GPT_CONTEXT_MAX_SOCIAL=8
 ```
 
 4) Start locally
@@ -101,6 +108,7 @@ npm run dev
 - X ingest is throttled by `X_MIN_POLL_MINUTES` (or `X_POLL_INTERVAL_MINUTES`) to control API spend.
 - X translation uses `OPENAI_API_KEY`; if unavailable, original text is stored and marked as translation failed.
 - Flight query data is read from recent cached observations first, then falls back to live API calls when needed.
+- LLM request telemetry is emitted to logs as JSON records with `type="llm.telemetry"` (latency, token usage, gating/fallback metadata).
 - Always verify critical decisions directly from source links.
 
 ## Signals summary API

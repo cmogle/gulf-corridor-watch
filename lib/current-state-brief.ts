@@ -1,5 +1,7 @@
 import { createHash } from "crypto";
 import OpenAI from "openai";
+import { gateSnapshotContext, gateSocialContext, getContextGatingConfig, type ContextGateSummary } from "./context-gating";
+import { extractUsage, logLlmTelemetry } from "./llm-telemetry";
 
 const BRIEF_KEY = "global";
 const DEFAULT_MODEL = "gpt-4o-mini";
@@ -37,6 +39,7 @@ type BriefSourceContext = {
   source_name: string;
   status_level: "normal" | "advisory" | "disrupted" | "unknown";
   reliability: "reliable" | "degraded" | "blocked";
+  validation_state: "validated" | "unvalidated" | "failed" | "skipped";
   priority: number;
   fetched_at: string;
   published_at: string | null;
@@ -53,6 +56,7 @@ type BriefSocialContext = {
   text_display: string;
   keywords: string[];
   confidence: number;
+  validation_state: "validated" | "unvalidated" | "failed" | "skipped";
 };
 
 export type BriefInputContext = {
@@ -69,6 +73,10 @@ export type BriefInputContext = {
   coverage: BriefCoverage;
   sources: BriefSourceContext[];
   social_signals: BriefSocialContext[];
+  context_gating: {
+    source: ContextGateSummary;
+    social: ContextGateSummary;
+  };
 };
 
 type SnapshotRow = {
@@ -76,10 +84,11 @@ type SnapshotRow = {
   source_name: string;
   status_level: "normal" | "advisory" | "disrupted" | "unknown";
   reliability: "reliable" | "degraded" | "blocked";
-  priority: number;
+  validation_state: "validated" | "unvalidated" | "failed" | "skipped";
   fetched_at: string;
   published_at: string | null;
   freshness_target_minutes: number;
+  priority: number;
   title: string;
   summary: string;
 };
@@ -93,6 +102,7 @@ type SocialSignalRow = {
   text_en: string | null;
   keywords: string[];
   confidence: number;
+  validation_state: "validated" | "unvalidated" | "failed" | "skipped";
 };
 
 type FlightRow = {
@@ -232,6 +242,7 @@ export function computeBriefInputHashForPolicy(input: BriefInputContext, narrati
       source_id: row.source_id,
       status_level: row.status_level,
       reliability: row.reliability,
+      validation_state: row.validation_state,
       priority: row.priority,
       fetched_at: row.fetched_at,
       published_at: row.published_at,
@@ -244,6 +255,7 @@ export function computeBriefInputHashForPolicy(input: BriefInputContext, narrati
       source_id: row.source_id,
       handle: row.handle,
       posted_at: row.posted_at,
+      validation_state: row.validation_state,
       text_display: compact(row.text_display, 300),
       keywords: [...row.keywords].sort(),
       confidence: Math.round(row.confidence * 1000) / 1000,
@@ -440,28 +452,43 @@ function rowToBrief(row: PersistedBriefRow): CurrentStateBrief {
 export async function buildBriefInputContext(): Promise<BriefInputContext> {
   const supabase = await getSupabaseAdminClient();
   const cutoff = new Date(Date.now() - 45 * 60_000).toISOString();
+  const gating = getContextGatingConfig();
+  const nowMs = Date.now();
 
-  const [{ data: snapshots, error: snapshotsError }, { data: socialSignals, error: socialSignalsError }, { data: flights, error: flightsError }] =
-    await Promise.all([
-      supabase
-        .from("latest_source_snapshots")
-        .select("source_id,source_name,status_level,reliability,priority,fetched_at,published_at,freshness_target_minutes,title,summary")
-        .limit(150),
-      supabase
-        .from("social_signals")
-        .select("linked_source_id,handle,posted_at,text,text_original,text_en,keywords,confidence")
-        .eq("provider", "x")
-        .order("posted_at", { ascending: false })
-        .limit(400),
-      supabase.from("flight_observations").select("status,is_delayed,fetched_at").gte("fetched_at", cutoff).order("fetched_at", { ascending: false }).limit(2500),
-    ]);
-
+  const snapshotSelect = "source_id,source_name,status_level,reliability,validation_state,fetched_at,published_at,freshness_target_minutes,priority,title,summary";
+  const legacySnapshotSelect = "source_id,source_name,status_level,reliability,fetched_at,published_at,freshness_target_minutes,priority,title,summary";
+  let { data: snapshots, error: snapshotsError } = await supabase.from("latest_source_snapshots").select(snapshotSelect).limit(150);
+  if (snapshotsError && /validation_state|content_hash|validated_at/i.test(snapshotsError.message ?? "")) {
+    const legacy = await supabase.from("latest_source_snapshots").select(legacySnapshotSelect).limit(150);
+    snapshots = (legacy.data ?? []).map((row) => ({ ...row, validation_state: "unvalidated" }));
+    snapshotsError = legacy.error;
+  }
   if (snapshotsError) throw snapshotsError;
+
+  const socialSelect = "linked_source_id,handle,posted_at,text,text_original,text_en,keywords,confidence,validation_state";
+  const legacySocialSelect = "linked_source_id,handle,posted_at,text,text_original,text_en,keywords,confidence";
+  let { data: socialSignals, error: socialSignalsError } = await supabase
+    .from("social_signals")
+    .select(socialSelect)
+    .eq("provider", "x")
+    .order("posted_at", { ascending: false })
+    .limit(400);
+  if (socialSignalsError && /validation_state/i.test(socialSignalsError.message ?? "")) {
+    const legacy = await supabase.from("social_signals").select(legacySocialSelect).eq("provider", "x").order("posted_at", { ascending: false }).limit(400);
+    socialSignals = (legacy.data ?? []).map((row) => ({ ...row, validation_state: "unvalidated" }));
+    socialSignalsError = legacy.error;
+  }
   if (socialSignalsError) throw socialSignalsError;
+
+  const { data: flights, error: flightsError } = await supabase
+    .from("flight_observations")
+    .select("status,is_delayed,fetched_at")
+    .gte("fetched_at", cutoff)
+    .order("fetched_at", { ascending: false })
+    .limit(2500);
   if (flightsError) throw flightsError;
 
   const nowIso = new Date().toISOString();
-  const nowMs = Date.now();
 
   const mappedSources = ((snapshots ?? []) as SnapshotRow[])
     .map((row) => {
@@ -471,6 +498,7 @@ export async function buildBriefInputContext(): Promise<BriefInputContext> {
         source_name: row.source_name,
         status_level: row.status_level,
         reliability: row.reliability,
+        validation_state: row.validation_state,
         priority: Number(row.priority ?? 0) || 0,
         fetched_at: row.fetched_at,
         published_at: row.published_at,
@@ -494,8 +522,55 @@ export async function buildBriefInputContext(): Promise<BriefInputContext> {
       text_display: row.text_en ?? row.text_original ?? row.text,
       keywords: row.keywords ?? [],
       confidence: Number(row.confidence ?? 0) || 0,
+      validation_state: row.validation_state,
     }))
     .sort((a, b) => `${a.source_id}:${a.handle}`.localeCompare(`${b.source_id}:${b.handle}`));
+
+  const sourceGate = gateSnapshotContext(
+    mappedSources.map((row) => ({
+      source_id: row.source_id,
+      source_name: row.source_name,
+      title: row.title,
+      summary: row.summary,
+      reliability: row.reliability,
+      validation_state: row.validation_state,
+      fetched_at: row.fetched_at,
+      freshness_target_minutes: row.freshness_target_minutes,
+      priority: row.priority,
+    })),
+    {
+      nowMs,
+      maxAgeMinutes: gating.source_max_age_minutes,
+      minFreshMinutes: gating.source_min_fresh_minutes,
+      freshnessMultiplier: gating.source_freshness_multiplier,
+      maxRows: gating.source_max_rows,
+    },
+  );
+  const sourceById = new Map(mappedSources.map((row) => [row.source_id, row]));
+  const gatedSources = sourceGate.selected
+    .map((row) => sourceById.get(row.source_id))
+    .filter((row): row is BriefSourceContext => Boolean(row));
+
+  const socialGate = gateSocialContext(
+    mappedSignals.map((row) => ({
+      linked_source_id: row.source_id,
+      handle: row.handle,
+      posted_at: row.posted_at,
+      text_en: row.text_display,
+      text_original: row.text_display,
+      confidence: row.confidence,
+      validation_state: row.validation_state,
+    })),
+    {
+      nowMs,
+      maxAgeMinutes: gating.social_max_age_minutes,
+      maxRows: gating.social_max_rows,
+    },
+  );
+  const signalByKey = new Map(mappedSignals.map((row) => [`${row.source_id}:${row.handle}:${row.posted_at}`, row]));
+  const gatedSignals = socialGate.selected
+    .map((row) => signalByKey.get(`${row.linked_source_id}:${row.handle}:${row.posted_at}`))
+    .filter((row): row is BriefSocialContext => Boolean(row));
 
   const flightRows = (flights ?? []) as FlightRow[];
   const latestFlightFetch = flightRows.length > 0 ? flightRows[0].fetched_at : null;
@@ -528,8 +603,12 @@ export async function buildBriefInputContext(): Promise<BriefInputContext> {
       stale_sources: staleSources.sort(),
       missing_expected: [...EXPECTED_MISSING_SOURCES],
     },
-    sources: mappedSources,
-    social_signals: mappedSignals,
+    sources: gatedSources,
+    social_signals: gatedSignals,
+    context_gating: {
+      source: sourceGate.summary,
+      social: socialGate.summary,
+    },
   };
 }
 
@@ -537,9 +616,40 @@ async function generateBriefParagraphWithModel(
   context: BriefInputContext,
   fallbackParagraph: string,
   basis: NarrativeBasis,
-): Promise<{ paragraph: string; model: string | null; fallback_reason: string | null }> {
+): Promise<{
+  paragraph: string;
+  model: string | null;
+  fallback_reason: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  duration_ms: number;
+}> {
+  const startedAt = Date.now();
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return { paragraph: fallbackParagraph, model: null, fallback_reason: "missing_openai_api_key" };
+  if (!apiKey) {
+    logLlmTelemetry("brief_generation", {
+      route: "/api/brief/refresh",
+      mode: "current_state_brief",
+      model: null,
+      success: false,
+      duration_ms: Date.now() - startedAt,
+      fallback_reason: "missing_openai_api_key",
+      context: {
+        source_rows: context.sources.length,
+        social_rows: context.social_signals.length,
+      },
+    });
+    return {
+      paragraph: fallbackParagraph,
+      model: null,
+      fallback_reason: "missing_openai_api_key",
+      prompt_tokens: null,
+      completion_tokens: null,
+      total_tokens: null,
+      duration_ms: Date.now() - startedAt,
+    };
+  }
 
   const timeoutMs = parsePositiveInt(process.env.CURRENT_STATE_BRIEF_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
   const model = process.env.CURRENT_STATE_BRIEF_MODEL?.trim() || DEFAULT_MODEL;
@@ -591,13 +701,95 @@ async function generateBriefParagraphWithModel(
     const content = completion.choices[0]?.message?.content ?? "";
     const parsed = JSON.parse(extractBriefJsonObject(content)) as { paragraph?: unknown };
     const paragraph = typeof parsed.paragraph === "string" ? compact(parsed.paragraph, 1200) : "";
-    if (!paragraph) return { paragraph: fallbackParagraph, model: null, fallback_reason: "empty_or_invalid_model_output" };
-    if (!isNarrativePolicyCompliant(paragraph, { allowXMention: basis.corroborated_social_rows.length > 0 })) {
-      return { paragraph: fallbackParagraph, model: null, fallback_reason: "policy_non_compliant_output" };
+    if (!paragraph) {
+      const usage = extractUsage(completion.usage);
+      logLlmTelemetry("brief_generation", {
+        route: "/api/brief/refresh",
+        mode: "current_state_brief",
+        model,
+        success: false,
+        duration_ms: Date.now() - startedAt,
+        fallback_reason: "empty_or_invalid_model_output",
+        ...usage,
+      });
+      return {
+        paragraph: fallbackParagraph,
+        model: null,
+        fallback_reason: "empty_or_invalid_model_output",
+        ...usage,
+        duration_ms: Date.now() - startedAt,
+      };
     }
-    return { paragraph, model, fallback_reason: null };
-  } catch {
-    return { paragraph: fallbackParagraph, model: null, fallback_reason: "model_request_failed" };
+
+    if (!isNarrativePolicyCompliant(paragraph, { allowXMention: basis.corroborated_social_rows.length > 0 })) {
+      const usage = extractUsage(completion.usage);
+      logLlmTelemetry("brief_generation", {
+        route: "/api/brief/refresh",
+        mode: "current_state_brief",
+        model,
+        success: false,
+        duration_ms: Date.now() - startedAt,
+        fallback_reason: "policy_non_compliant_output",
+        ...usage,
+      });
+      return {
+        paragraph: fallbackParagraph,
+        model: null,
+        fallback_reason: "policy_non_compliant_output",
+        ...usage,
+        duration_ms: Date.now() - startedAt,
+      };
+    }
+
+    const usage = extractUsage(completion.usage);
+    logLlmTelemetry("brief_generation", {
+      route: "/api/brief/refresh",
+      mode: "current_state_brief",
+      model,
+      success: true,
+      duration_ms: Date.now() - startedAt,
+      ...usage,
+      context: {
+        freshness_state: context.freshness_state,
+        confidence: context.confidence,
+        source_rows: context.sources.length,
+        social_rows: context.social_signals.length,
+        source_gate_policy: context.context_gating.source.policy,
+        social_gate_policy: context.context_gating.social.policy,
+      },
+    });
+    return {
+      paragraph,
+      model,
+      fallback_reason: null,
+      ...usage,
+      duration_ms: Date.now() - startedAt,
+    };
+  } catch (error) {
+    logLlmTelemetry("brief_generation", {
+      route: "/api/brief/refresh",
+      mode: "current_state_brief",
+      model,
+      success: false,
+      duration_ms: Date.now() - startedAt,
+      fallback_reason: "model_request_failed",
+      error: String(error),
+      context: {
+        freshness_state: context.freshness_state,
+        confidence: context.confidence,
+        source_rows: context.sources.length,
+        social_rows: context.social_signals.length,
+      },
+    });
+    return {
+      paragraph: fallbackParagraph,
+      model: null,
+      fallback_reason: "model_request_failed",
+      prompt_tokens: null,
+      completion_tokens: null,
+      total_tokens: null,
+      duration_ms: Date.now() - startedAt,
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -633,6 +825,7 @@ export async function refreshCurrentStateBrief(opts?: { forceRegenerate?: boolea
   regenerated: boolean;
   reason: string;
 }> {
+  const startedAt = Date.now();
   const supabase = await getSupabaseAdminClient();
   const context = await buildBriefInputContext();
   const hash = computeBriefInputHash(context);
@@ -655,6 +848,21 @@ export async function refreshCurrentStateBrief(opts?: { forceRegenerate?: boolea
       .select("*")
       .single();
     if (updateError) throw updateError;
+    logLlmTelemetry("brief_refresh", {
+      route: "/api/brief/refresh",
+      mode: "current_state_brief",
+      model: (updated as PersistedBriefRow).model ?? null,
+      success: true,
+      duration_ms: Date.now() - startedAt,
+      fallback_reason: "unchanged_input_hash",
+      context: {
+        regenerated: false,
+        source_rows: context.sources.length,
+        social_rows: context.social_signals.length,
+        source_gate_policy: context.context_gating.source.policy,
+        social_gate_policy: context.context_gating.social.policy,
+      },
+    });
     return { item: rowToBrief(updated as PersistedBriefRow), regenerated: false, reason: "unchanged_input_hash" };
   }
 
@@ -672,6 +880,8 @@ export async function refreshCurrentStateBrief(opts?: { forceRegenerate?: boolea
       source_name: row.source_name,
       status_level: row.status_level,
       reliability: row.reliability,
+      validation_state: row.validation_state,
+      priority: row.priority,
       fetched_at: row.fetched_at,
       stale: row.stale,
     })),
@@ -681,6 +891,7 @@ export async function refreshCurrentStateBrief(opts?: { forceRegenerate?: boolea
       posted_at: row.posted_at,
       keywords: row.keywords,
       confidence: row.confidence,
+      validation_state: row.validation_state,
     })),
   };
 
@@ -705,6 +916,31 @@ export async function refreshCurrentStateBrief(opts?: { forceRegenerate?: boolea
 
   const { data: saved, error: saveError } = await supabase.from("current_state_brief").upsert(upsertPayload, { onConflict: "key" }).select("*").single();
   if (saveError) throw saveError;
+
+  logLlmTelemetry("brief_refresh", {
+    route: "/api/brief/refresh",
+    mode: "current_state_brief",
+    model: generation.model,
+    success: true,
+    duration_ms: Date.now() - startedAt,
+    fallback_reason: generation.fallback_reason,
+    prompt_tokens: generation.prompt_tokens,
+    completion_tokens: generation.completion_tokens,
+    total_tokens: generation.total_tokens,
+    context: {
+      regenerated: true,
+      reason: generation.model ? "input_changed_regenerated_model" : "input_changed_regenerated_fallback",
+      generation_duration_ms: generation.duration_ms,
+      source_rows: context.sources.length,
+      social_rows: context.social_signals.length,
+      source_gate_policy: context.context_gating.source.policy,
+      social_gate_policy: context.context_gating.social.policy,
+      source_total: context.context_gating.source.total,
+      source_selected: context.context_gating.source.selected,
+      social_total: context.context_gating.social.total,
+      social_selected: context.context_gating.social.selected,
+    },
+  });
 
   return {
     item: rowToBrief(saved as PersistedBriefRow),

@@ -71,3 +71,53 @@ test("isLowConfidenceExtraction returns false for substantive summary", () => {
 test("isLowConfidenceExtraction returns true for mostly non-alphabetic text", () => {
   assert.equal(isLowConfidenceExtraction("* A+ A A- *** --- === |||  ### >>>", "Some Source"), true);
 });
+
+test("isLowConfidenceExtraction catches 'skip to main content' nav chrome", () => {
+  assert.equal(
+    isLowConfidenceExtraction(
+      "Skip to main content Sitemap Contact Feedback Media Login Screen Reader Access Please select Language Search Menu Home About Us Profiles",
+      "India MEA Advisories",
+    ),
+    true,
+  );
+});
+
+test("isLowConfidenceExtraction catches language selector patterns", () => {
+  assert.equal(
+    isLowConfidenceExtraction(
+      "Travel Update LOGIN United Arab Emirates AED en English Deutsch English español français italiano Türkçe русский العربية Login AirRewards Discover AirRewards Join now",
+      "Air Arabia Travel Updates",
+    ),
+    true,
+  );
+});
+
+test("isLowConfidenceExtraction catches airline menu chrome", () => {
+  assert.equal(
+    isLowConfidenceExtraction(
+      "Travel updates | Help | Emirates Skip to the main contentAccessibility information BOOK Search flights MANAGE Search flights EXPERIENCE Search flights WHERE WE FLY Search flights",
+      "Emirates Travel Updates",
+    ),
+    true,
+  );
+});
+
+test("isLowConfidenceExtraction catches consecutive duplicate words", () => {
+  assert.equal(
+    isLowConfidenceExtraction(
+      "News Center Government Government Government Government Economy Government Government Government DPC Economy Government",
+      "Dubai Government Media Office",
+    ),
+    true,
+  );
+});
+
+test("isLowConfidenceExtraction passes real news content with nav-like words", () => {
+  assert.equal(
+    isLowConfidenceExtraction(
+      "The FCDO advises against all but essential travel to the United Arab Emirates due to the heightened regional security situation. Travellers currently in the UAE should register their presence with the embassy for safety and insurance purposes.",
+      "UK FCDO Travel Advice",
+    ),
+    false,
+  );
+});

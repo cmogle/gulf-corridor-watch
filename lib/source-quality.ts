@@ -77,6 +77,29 @@ export function isUsableFeedItem(item: FeedItemLike): boolean {
   return !isUnusableSourceText(merged);
 }
 
+// Common words found in navigation, menus, footers, and UI chrome
+const NAV_CHROME_WORDS = new Set([
+  "login", "logout", "signin", "signup", "register", "subscribe",
+  "search", "menu", "home", "sitemap", "contact", "submit",
+  "skip", "accessibility", "cookie", "cookies", "privacy",
+  "close", "open", "toggle", "expand", "collapse",
+  "previous", "next", "back", "forward",
+  "facebook", "twitter", "instagram", "linkedin", "youtube",
+  "share", "follow", "download", "upload",
+  "select", "language", "country",
+  "about", "careers", "terms", "conditions", "disclaimer",
+]);
+
+// Patterns that strongly indicate navigation chrome
+const NAV_CHROME_PATTERNS = [
+  /skip to (main |the )?content/i,
+  /select your (country|language|region)/i,
+  /\b(en|ar|fr|de|es|it|ru|zh|tr)\s+(en|ar|fr|de|es|it|ru|zh|tr)\s+(en|ar|fr|de|es|it|ru|zh|tr)\b/i,
+  /\benglish\b.*\b(deutsch|español|français|italiano|العربية|русский|türkçe)\b/i,
+  /\b(book|search|manage|experience)\b.*\b(book|search|manage|experience)\b.*\b(book|search|manage|experience)\b/i,
+  /log\s*in\s+air\s*rewards/i,
+];
+
 /**
  * Detect low-confidence extractions that pass unusability checks
  * but are still too poor to display as reliable content.
@@ -99,6 +122,30 @@ export function isLowConfidenceExtraction(summary: string, sourceName: string): 
     const overlap = [...summaryWords].filter(w => nameWords.has(w)).length;
     if (overlap / summaryWords.size > 0.9) return true;
   }
+
+  // Strong nav-chrome pattern match (language selectors, skip links, etc.)
+  if (NAV_CHROME_PATTERNS.some((p) => p.test(cleaned))) return true;
+
+  // High density of navigation/UI words in first 300 chars
+  const sampleWords = cleaned.slice(0, 300).toLowerCase().split(/\s+/);
+  if (sampleWords.length >= 10) {
+    const navHits = sampleWords.filter((w) => NAV_CHROME_WORDS.has(w)).length;
+    if (navHits / sampleWords.length > 0.15) return true;
+  }
+
+  // Consecutive duplicate words (e.g. "Government Government Government")
+  const words = cleaned.split(/\s+/);
+  let maxConsecutive = 1;
+  let consecutive = 1;
+  for (let i = 1; i < words.length; i++) {
+    if (words[i].toLowerCase() === words[i - 1].toLowerCase()) {
+      consecutive++;
+      if (consecutive > maxConsecutive) maxConsecutive = consecutive;
+    } else {
+      consecutive = 1;
+    }
+  }
+  if (maxConsecutive >= 3) return true;
 
   return false;
 }

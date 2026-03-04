@@ -66,11 +66,11 @@ export type FeedItemLike = {
   headline: string;
   summary: string;
   reliability: "reliable" | "degraded" | "blocked";
-  update_type: "snapshot" | "x";
+  update_type: "snapshot" | "x" | "news";
 };
 
 export function isUsableFeedItem(item: FeedItemLike): boolean {
-  if (item.update_type === "x") return true;
+  if (item.update_type === "x" || item.update_type === "news") return true;
   if (item.reliability === "degraded" || item.reliability === "blocked") return false;
   if (!item.summary.trim()) return false;
   const merged = `${item.headline} ${item.summary}`;

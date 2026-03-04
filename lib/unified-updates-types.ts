@@ -1,4 +1,4 @@
-export type UnifiedUpdateType = "snapshot" | "x";
+export type UnifiedUpdateType = "snapshot" | "x" | "news";
 export type UnifiedValidationState = "validated" | "unvalidated" | "failed" | "skipped";
 
 export type UnifiedUpdateItem = {

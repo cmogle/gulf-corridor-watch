@@ -6,6 +6,8 @@ type HourlyBin = {
   arrivals: number;
   departures: number;
   total: number;
+  bin_start: string;
+  bin_end: string;
 };
 
 type BaselineBin = {
@@ -16,6 +18,8 @@ type BaselineBin = {
 type Props = {
   bins: HourlyBin[];
   baseline: BaselineBin[] | null;
+  onClickBin?: (bin: HourlyBin) => void;
+  activeHour?: number | null;
 };
 
 const W = 420;
@@ -27,7 +31,7 @@ const PAD_B = 28;
 const CHART_W = W - PAD_L - PAD_R;
 const CHART_H = H - PAD_T - PAD_B;
 
-export function HourlyVolumeChart({ bins, baseline }: Props) {
+export function HourlyVolumeChart({ bins, baseline, onClickBin, activeHour }: Props) {
   if (bins.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-gray-300 p-4 text-center text-sm text-[var(--text-secondary)]">
@@ -68,6 +72,8 @@ export function HourlyVolumeChart({ bins, baseline }: Props) {
     baselinePath = points.join(" ");
   }
 
+  const interactive = !!onClickBin;
+
   return (
     <div>
       <svg
@@ -102,20 +108,48 @@ export function HourlyVolumeChart({ bins, baseline }: Props) {
           const x = PAD_L + i * (barWidth + barGap);
           const arrH = (bin.arrivals / yMax) * CHART_H;
           const depH = (bin.departures / yMax) * CHART_H;
+          const isActive = activeHour === bin.hour;
+          const dimmed = activeHour != null && !isActive;
 
           return (
-            <g key={i}>
+            <g
+              key={i}
+              onClick={() => onClickBin?.(bin)}
+              className={interactive ? "cursor-pointer" : undefined}
+              role={interactive ? "button" : undefined}
+              tabIndex={interactive ? 0 : undefined}
+              aria-label={interactive ? `${bin.label}: ${bin.total} flights` : undefined}
+              onKeyDown={interactive ? (e) => { if (e.key === "Enter") onClickBin?.(bin); } : undefined}
+            >
+              {/* Hit area — invisible rect for easier clicking */}
+              {interactive && (
+                <rect
+                  x={x} y={PAD_T}
+                  width={barWidth} height={CHART_H}
+                  fill="transparent"
+                />
+              )}
+
+              {/* Active highlight background */}
+              {isActive && (
+                <rect
+                  x={x - 1} y={PAD_T}
+                  width={barWidth + 2} height={CHART_H}
+                  fill="var(--primary-blue)" opacity="0.08" rx="2"
+                />
+              )}
+
               {/* Departures (bottom) */}
               <rect
                 x={x} y={PAD_T + CHART_H - depH}
                 width={barWidth} height={Math.max(depH, 0)}
-                fill="var(--primary-blue)" opacity="0.35" rx="1"
+                fill="var(--primary-blue)" opacity={dimmed ? 0.12 : 0.35} rx="1"
               />
               {/* Arrivals (stacked on top) */}
               <rect
                 x={x} y={PAD_T + CHART_H - depH - arrH}
                 width={barWidth} height={Math.max(arrH, 0)}
-                fill="var(--primary-blue)" opacity="0.7" rx="1"
+                fill="var(--primary-blue)" opacity={dimmed ? 0.25 : 0.7} rx="1"
               />
 
               {/* Total label */}
@@ -124,7 +158,13 @@ export function HourlyVolumeChart({ bins, baseline }: Props) {
                   x={x + barWidth / 2}
                   y={PAD_T + CHART_H - depH - arrH - 4}
                   textAnchor="middle"
-                  style={{ fontSize: 7, fontFamily: "var(--font-mono)", fontWeight: 600, fill: "var(--text-primary)" }}
+                  style={{
+                    fontSize: 7,
+                    fontFamily: "var(--font-mono)",
+                    fontWeight: 600,
+                    fill: dimmed ? "var(--text-secondary)" : "var(--text-primary)",
+                    opacity: dimmed ? 0.4 : 1,
+                  }}
                 >
                   {bin.total}
                 </text>
@@ -135,7 +175,12 @@ export function HourlyVolumeChart({ bins, baseline }: Props) {
                 x={x + barWidth / 2}
                 y={H - 6}
                 textAnchor="middle"
-                style={{ fontSize: 7, fontFamily: "var(--font-mono)", fill: "var(--text-secondary)" }}
+                style={{
+                  fontSize: 7,
+                  fontFamily: "var(--font-mono)",
+                  fill: isActive ? "var(--primary-blue)" : "var(--text-secondary)",
+                  fontWeight: isActive ? 600 : 400,
+                }}
               >
                 {bin.label}
               </text>

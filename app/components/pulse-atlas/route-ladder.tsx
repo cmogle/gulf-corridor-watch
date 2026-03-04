@@ -6,6 +6,7 @@ type Props = {
   edges: NetworkEdge[];
   hoveredEdge: string | null;
   onHoverEdge: (key: string | null) => void;
+  onClickEdge?: (from: string, to: string) => void;
 };
 
 function edgeKey(e: NetworkEdge): string {
@@ -20,7 +21,7 @@ function confidenceStyle(c: Confidence): { bg: string; text: string; label: stri
   }
 }
 
-export function RouteLadder({ edges, hoveredEdge, onHoverEdge }: Props) {
+export function RouteLadder({ edges, hoveredEdge, onHoverEdge, onClickEdge }: Props) {
   if (edges.length === 0) {
     return (
       <div className="flex h-full items-center justify-center rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -54,6 +55,7 @@ export function RouteLadder({ edges, hoveredEdge, onHoverEdge }: Props) {
               className={`flex items-center gap-2 border-b border-gray-50 px-3 py-2.5 transition-colors cursor-pointer ${
                 isHovered ? "bg-blue-50/60" : "hover:bg-gray-50/60"
               }`}
+              onClick={() => onClickEdge?.(edge.from, edge.to)}
               onMouseEnter={() => onHoverEdge(key)}
               onMouseLeave={() => onHoverEdge(null)}
             >

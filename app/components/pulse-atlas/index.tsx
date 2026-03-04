@@ -121,6 +121,7 @@ export function AirspacePulseAtlas() {
                 edges={filteredEdges}
                 hoveredEdge={hoveredEdge}
                 onHoverEdge={setHoveredEdge}
+                onClickEdge={openRoute}
               />
             </div>
           </div>

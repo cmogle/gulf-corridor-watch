@@ -21,6 +21,8 @@ export type HourlyBin = {
   arrivals: number;
   departures: number;
   total: number;
+  bin_start: string;  // ISO timestamp — start of this hour window
+  bin_end: string;    // ISO timestamp — end of this hour window
 };
 
 export type BaselineBin = {
@@ -57,6 +59,21 @@ export type ActiveFlight = {
   fetched_at: string;
 };
 
+export type FlightRecord = {
+  flight_number: string;
+  airline: string | null;
+  origin_iata: string | null;
+  destination_iata: string | null;
+  status: string;
+  aircraft_type: string | null;
+  aircraft_family: AircraftFamily;
+  registration: string | null;
+  is_delayed: boolean;
+  delay_minutes: number | null;
+  fetched_at: string;
+  hour: number;  // UAE hour 0-23
+};
+
 export type AirportDetailResult = {
   ok: true;
   airport: { iata: string; label: string };
@@ -67,6 +84,7 @@ export type AirportDetailResult = {
   airlines: AirlineCount[];
   equipment: EquipmentCount[];
   delays: DelayStats;
+  flights: FlightRecord[];
   as_of: string;
 };
 
@@ -80,6 +98,7 @@ export type RouteDetailResult = {
   airlines: AirlineCount[];
   equipment: EquipmentCount[];
   delays: DelayStats;
+  flights: FlightRecord[];
   as_of: string;
 };
 
@@ -157,6 +176,32 @@ function hubLabel(iata: string): string {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Flight record builder                                              */
+/* ------------------------------------------------------------------ */
+
+function toFlightRecords(rows: ObsRow[]): FlightRecord[] {
+  return rows
+    .map((r) => {
+      const typeCode = (r.raw_payload?.type as string) ?? null;
+      return {
+        flight_number: r.flight_number,
+        airline: r.airline,
+        origin_iata: r.origin_iata,
+        destination_iata: r.destination_iata,
+        status: r.status,
+        aircraft_type: typeCode,
+        aircraft_family: classifyAircraftType(typeCode),
+        registration: (r.raw_payload?.reg as string) ?? null,
+        is_delayed: r.is_delayed,
+        delay_minutes: r.delay_minutes,
+        fetched_at: r.fetched_at,
+        hour: toUAEHour(r.fetched_at),
+      };
+    })
+    .sort((a, b) => new Date(b.fetched_at).getTime() - new Date(a.fetched_at).getTime());
+}
+
+/* ------------------------------------------------------------------ */
 /*  Hourly bin builder                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -191,6 +236,8 @@ function buildHourlyBins(
       arrivals,
       departures,
       total: arrivals + departures,
+      bin_start: new Date(binStart).toISOString(),
+      bin_end: new Date(binEnd).toISOString(),
     });
   }
 
@@ -371,6 +418,7 @@ export async function queryAirportDetail(
     airlines: aggregateAirlines(rows),
     equipment: aggregateEquipment(rows),
     delays: aggregateDelays(rows),
+    flights: toFlightRecords(rows),
     as_of: new Date().toISOString(),
   };
 }
@@ -445,6 +493,7 @@ export async function queryRouteDetail(
     airlines: aggregateAirlines(rows),
     equipment: aggregateEquipment(rows),
     delays: aggregateDelays(rows),
+    flights: toFlightRecords(rows),
     as_of: new Date().toISOString(),
   };
 }

@@ -4,8 +4,11 @@ import { useState, useEffect, useCallback } from "react";
 import { HourlyVolumeChart } from "./hourly-volume-chart";
 import { AirlineBreakdown } from "./airline-breakdown";
 import { EquipmentMixChart } from "./equipment-mix-chart";
+import { FlightList } from "./flight-list";
 import type { RouteDetailResult } from "@/lib/flight-detail";
 import { familyLabel, classifyAircraftType } from "@/lib/aircraft-family";
+import type { DrillDownFilter } from "./drill-down-filter";
+import { applyFilter } from "./drill-down-filter";
 
 type Props = { from: string; to: string };
 
@@ -37,6 +40,7 @@ export function RouteDetail({ from, to }: Props) {
   const [data, setData] = useState<RouteDetailResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [drillFilter, setDrillFilter] = useState<DrillDownFilter>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -58,6 +62,7 @@ export function RouteDetail({ from, to }: Props) {
   useEffect(() => {
     setLoading(true);
     setData(null);
+    setDrillFilter(null);
     void fetchData();
   }, [fetchData]);
 
@@ -95,6 +100,8 @@ export function RouteDetail({ from, to }: Props) {
 
   if (!data) return null;
 
+  const filteredFlights = applyFilter(data.flights ?? [], drillFilter);
+
   return (
     <div className="space-y-5 p-5 animate-fade-in-up">
       {/* Header */}
@@ -124,10 +131,21 @@ export function RouteDetail({ from, to }: Props) {
         <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
           12-Hour Volume
         </p>
-        <HourlyVolumeChart bins={data.hourly_bins} baseline={data.baseline_bins} />
+        <HourlyVolumeChart
+          bins={data.hourly_bins}
+          baseline={data.baseline_bins}
+          onClickBin={(bin) =>
+            setDrillFilter((prev) =>
+              prev?.kind === "hour" && prev.hour === bin.hour
+                ? null
+                : { kind: "hour", hour: bin.hour, binStart: bin.bin_start, binEnd: bin.bin_end },
+            )
+          }
+          activeHour={drillFilter?.kind === "hour" ? drillFilter.hour : null}
+        />
       </div>
 
-      {/* Active flights */}
+      {/* Active flights (last 30m — always shown) */}
       {data.active_flights.length > 0 && (
         <div>
           <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
@@ -181,7 +199,15 @@ export function RouteDetail({ from, to }: Props) {
           <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
             Airlines (12h)
           </p>
-          <AirlineBreakdown airlines={data.airlines} />
+          <AirlineBreakdown
+            airlines={data.airlines}
+            onClickAirline={(name) =>
+              setDrillFilter((prev) =>
+                prev?.kind === "airline" && prev.name === name ? null : { kind: "airline", name },
+              )
+            }
+            activeAirline={drillFilter?.kind === "airline" ? drillFilter.name : null}
+          />
         </div>
       )}
 
@@ -191,7 +217,17 @@ export function RouteDetail({ from, to }: Props) {
           <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
             Aircraft Types (12h)
           </p>
-          <EquipmentMixChart equipment={data.equipment} />
+          <EquipmentMixChart
+            equipment={data.equipment}
+            onClickFamily={(family) =>
+              setDrillFilter((prev) =>
+                prev?.kind === "equipment" && prev.family === family
+                  ? null
+                  : { kind: "equipment", family },
+              )
+            }
+            activeFamily={drillFilter?.kind === "equipment" ? drillFilter.family : null}
+          />
         </div>
       )}
 
@@ -201,22 +237,48 @@ export function RouteDetail({ from, to }: Props) {
           Delays & Cancellations (12h)
         </p>
         <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-lg bg-gray-50 p-3 text-center">
+          <button
+            type="button"
+            onClick={() =>
+              setDrillFilter((prev) => (prev?.kind === "delayed" ? null : { kind: "delayed" }))
+            }
+            className={`rounded-lg p-3 text-center transition-colors hover:bg-gray-100 ${
+              drillFilter?.kind === "delayed" ? "bg-blue-50/60 ring-1 ring-blue-200" : "bg-gray-50"
+            }`}
+          >
             <p className="font-mono text-lg font-medium">{data.delays.delayed_pct}%</p>
             <p className="text-[10px] text-[var(--text-secondary)]">Delayed</p>
-          </div>
+          </button>
           <div className="rounded-lg bg-gray-50 p-3 text-center">
             <p className="font-mono text-lg font-medium">{data.delays.avg_delay_min}m</p>
             <p className="text-[10px] text-[var(--text-secondary)]">Avg Delay</p>
           </div>
-          <div className="rounded-lg bg-gray-50 p-3 text-center">
+          <button
+            type="button"
+            onClick={() =>
+              setDrillFilter((prev) => (prev?.kind === "cancelled" ? null : { kind: "cancelled" }))
+            }
+            className={`rounded-lg p-3 text-center transition-colors hover:bg-gray-100 ${
+              drillFilter?.kind === "cancelled" ? "bg-blue-50/60 ring-1 ring-blue-200" : "bg-gray-50"
+            }`}
+          >
             <p className={`font-mono text-lg font-medium ${data.delays.cancelled > 0 ? "text-[var(--red)]" : ""}`}>
               {data.delays.cancelled}
             </p>
             <p className="text-[10px] text-[var(--text-secondary)]">Cancelled</p>
-          </div>
+          </button>
         </div>
       </div>
+
+      {/* Drill-down flight list */}
+      {drillFilter && (
+        <FlightList
+          flights={filteredFlights}
+          filter={drillFilter}
+          onClearFilter={() => setDrillFilter(null)}
+          contextType="route"
+        />
+      )}
 
       {/* Freshness */}
       <p className="text-xs text-[var(--text-secondary)]">

@@ -5,7 +5,9 @@ import { ingestAirports } from "./flightradar";
 import { ingestAirportsOpenSky } from "./opensky";
 import { fetchViaChromeRelay } from "./chrome-relay";
 import { pollOfficialXSignals } from "./x-signals";
+import { createHash } from "crypto";
 import { extractHtmlSnapshot, stripJinaPrefix, stripMarkdown, decodeEntities } from "./source-extractors";
+import { summarizeNewsCluster } from "./news-summarize";
 import {
   computeUpdateContentHash,
   getValidationMaxPerIngest,
@@ -220,6 +222,19 @@ const GULF_CORRIDOR_KEYWORDS = [
   "president trump", "trump", "posture", "deployment",
 ];
 
+export function stripGoogleNewsPublisher(title: string): { headline: string; publisher: string } {
+  const idx = title.lastIndexOf(" - ");
+  if (idx <= 0) return { headline: title.trim(), publisher: "" };
+  return {
+    headline: title.slice(0, idx).trim(),
+    publisher: title.slice(idx + 3).trim(),
+  };
+}
+
+export function isGoogleNewsSource(source: SourceDef): boolean {
+  return source.id.startsWith("gn_") && source.category === "news";
+}
+
 type RssItem = {
   title?: string;
   description?: string;
@@ -264,6 +279,110 @@ export function pickBestRssItemsScored(items: RssItem[], maxItems = 6): ScoredRs
   });
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, maxItems);
+}
+
+type NewsArticleRow = {
+  provider: "rss_item";
+  handle: string;
+  post_id: string;
+  posted_at: string;
+  text: string;
+  text_original: string;
+  text_en: string;
+  url: string;
+  keywords: string[];
+  fetched_at: string;
+  confidence: number;
+  linked_source_id: string;
+  language_original: null;
+  translation_provider: null;
+  translation_confidence: null;
+  translation_status: "not_needed";
+  content_hash: string | null;
+  validation_state: "skipped";
+  validation_score: null;
+  validation_reason: string;
+  validation_model: null;
+  validated_at: null;
+};
+
+async function storeNewsArticles(
+  source: SourceDef,
+  scoredItems: ScoredRssItem[],
+  rawItems: RssItem[],
+): Promise<{ stored: NewsArticleRow[]; allClean: Array<{ headline: string; description: string }> }> {
+  const supabase = getSupabaseAdmin();
+  const now = new Date().toISOString();
+
+  // Build clean article data
+  const allClean = scoredItems.map((item) => {
+    const { headline } = stripGoogleNewsPublisher(item.title);
+    const description = decodeEntities(item.description.replace(/<[^>]+>/g, " ")).slice(0, 300);
+    return { headline, description };
+  });
+
+  // Build rows for insertion
+  const rows: NewsArticleRow[] = [];
+  for (let i = 0; i < scoredItems.length; i++) {
+    const item = scoredItems[i];
+    const raw = rawItems.find((r) => r.title === item.title);
+    const articleUrl = raw?.link ?? "";
+    if (!articleUrl) continue;
+
+    const urlHash = createHash("sha256").update(articleUrl).digest("hex").slice(0, 32);
+    const { headline } = stripGoogleNewsPublisher(item.title);
+    const description = decodeEntities(item.description.replace(/<[^>]+>/g, " ")).slice(0, 300);
+    const textForKeywords = `${headline} ${description}`.toLowerCase();
+    const keywords = GULF_CORRIDOR_KEYWORDS.filter((kw) => textForKeywords.includes(kw));
+    const confidence = keywords.length === 0 ? 0.2 : Math.min(0.92, 0.2 + keywords.length * 0.15);
+    const posted = raw?.pubDate ? new Date(raw.pubDate).toISOString() : now;
+
+    rows.push({
+      provider: "rss_item",
+      handle: source.id,
+      post_id: urlHash,
+      posted_at: posted,
+      text: headline,
+      text_original: item.title,
+      text_en: description,
+      url: articleUrl,
+      keywords,
+      fetched_at: now,
+      confidence,
+      linked_source_id: source.id,
+      language_original: null,
+      translation_provider: null,
+      translation_confidence: null,
+      translation_status: "not_needed",
+      content_hash: null,
+      validation_state: "skipped",
+      validation_score: null,
+      validation_reason: "News article — validation via cluster summary",
+      validation_model: null,
+      validated_at: null,
+    });
+  }
+
+  if (rows.length === 0) return { stored: [], allClean };
+
+  // Cross-source dedup: check which URL hashes already exist across ANY gn_* source
+  const postIds = rows.map((r) => r.post_id);
+  const { data: existing } = await supabase
+    .from("social_signals")
+    .select("post_id")
+    .eq("provider", "rss_item")
+    .in("post_id", postIds);
+  const existingIds = new Set((existing ?? []).map((r: { post_id: string }) => r.post_id));
+  const fresh = rows.filter((r) => !existingIds.has(r.post_id));
+
+  if (fresh.length > 0) {
+    const { error } = await supabase
+      .from("social_signals")
+      .upsert(fresh, { onConflict: "provider,handle,post_id", ignoreDuplicates: true });
+    if (error) console.error(`storeNewsArticles error for ${source.id}:`, error.message);
+  }
+
+  return { stored: fresh, allClean };
 }
 
 async function fetchRss(source: SourceDef): Promise<Snapshot> {
@@ -313,6 +432,14 @@ async function fetchRss(source: SourceDef): Promise<Snapshot> {
       title = formatted.title || source.name;
       summary = formatted.summary;
     }
+  } else if (isGoogleNewsSource(source)) {
+    // Google News: store individual articles + generate AI summary
+    const { allClean } = await storeNewsArticles(source, scoredItems, rawItems);
+    const topicName = source.name.replace(/^Google News:\s*/i, "").trim();
+    summary = await summarizeNewsCluster(topicName, allClean);
+    title = allClean[0]?.headline
+      ? `${topicName}: ${allClean[0].headline.slice(0, 80)}`
+      : source.name;
   } else {
     const formatted = formatRssSummary(scoredItems);
     title = formatted.isBulletList ? source.name : (formatted.title || String(scoredItems[0]?.title ?? source.name));

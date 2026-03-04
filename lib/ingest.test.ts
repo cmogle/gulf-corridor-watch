@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatRssSummary, pickBestRssItemsScored, ingestSingleSource } from "./ingest.ts";
+import { formatRssSummary, pickBestRssItemsScored, ingestSingleSource, stripGoogleNewsPublisher, isGoogleNewsSource } from "./ingest.ts";
 
 test("formatRssSummary returns single item as direct headline + summary", () => {
   const result = formatRssSummary([
@@ -78,6 +78,40 @@ test("formatRssSummary decodes HTML entities in descriptions", () => {
   assert.ok(!result.summary.includes("&nbsp;"), "should not contain &nbsp;");
   assert.ok(result.summary.includes("Airport open"), "should preserve text before entity");
   assert.ok(result.summary.includes("Emirates confirms"), "should preserve text after entity");
+});
+
+test("stripGoogleNewsPublisher strips publisher from standard title", () => {
+  const result = stripGoogleNewsPublisher("Dubai airport open after strikes - Hindustan Times");
+  assert.equal(result.headline, "Dubai airport open after strikes");
+  assert.equal(result.publisher, "Hindustan Times");
+});
+
+test("stripGoogleNewsPublisher handles title with multiple dashes", () => {
+  const result = stripGoogleNewsPublisher("Is Dubai Airport Open? Check Status - Report - NewsX");
+  assert.equal(result.headline, "Is Dubai Airport Open? Check Status - Report");
+  assert.equal(result.publisher, "NewsX");
+});
+
+test("stripGoogleNewsPublisher returns full title when no dash separator", () => {
+  const result = stripGoogleNewsPublisher("Dubai airport remains operational");
+  assert.equal(result.headline, "Dubai airport remains operational");
+  assert.equal(result.publisher, "");
+});
+
+test("stripGoogleNewsPublisher handles pipe-separated publisher", () => {
+  const result = stripGoogleNewsPublisher("Airport update | World News - Hindustan Times");
+  assert.equal(result.headline, "Airport update | World News");
+  assert.equal(result.publisher, "Hindustan Times");
+});
+
+test("isGoogleNewsSource returns true for gn_ prefixed source ids", () => {
+  assert.equal(isGoogleNewsSource({ id: "gn_dubai_airport", category: "news" } as any), true);
+  assert.equal(isGoogleNewsSource({ id: "gn_uae_flights", category: "news" } as any), true);
+});
+
+test("isGoogleNewsSource returns false for non-gn sources", () => {
+  assert.equal(isGoogleNewsSource({ id: "bbc_middle_east", category: "news" } as any), false);
+  assert.equal(isGoogleNewsSource({ id: "us_state_dept_travel", category: "government" } as any), false);
 });
 
 test("ingestSingleSource is exported as a function", () => {

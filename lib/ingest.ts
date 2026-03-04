@@ -160,7 +160,10 @@ const BROWSERISH_HEADERS: Record<string, string> = {
 };
 
 // Sources whose primary URL is a JS SPA — Jina reader should be tried first
-const JINA_FIRST_SOURCES = new Set(["visit_dubai_news", "india_mea", "india_immigration_boi", "uae_mofa", "emirates_updates", "etihad_advisory", "flydubai_updates"]);
+const JINA_FIRST_SOURCES = new Set(["visit_dubai_news", "india_mea", "india_immigration_boi", "uae_mofa"]);
+
+// Airline SPAs: Jina returns page shell (false positive) — use ScrapingBee as primary
+const SCRAPING_PRIMARY_SOURCES = new Set(["emirates_updates", "etihad_advisory", "flydubai_updates"]);
 
 function getPrimaryUrls(source: SourceDef): string[] {
   if (JINA_FIRST_SOURCES.has(source.id)) {
@@ -482,37 +485,40 @@ async function fetchHtml(source: SourceDef): Promise<Snapshot> {
   let sourceUrl = source.url;
   let method: Snapshot["ingest_method"] = "official_web";
   let httpStatus = 200;
-  try {
-    const direct = await fetchTextWithFallback([...getPrimaryUrls(source), ...getFallbackUrls(source)], "html");
-    html = direct.text;
-    sourceUrl = direct.finalUrl;
-    httpStatus = direct.status;
-    if (direct.fromMirror) method = "relay";
-  } catch (error) {
-    let recovered = false;
-    const SCRAPING_ALLOWED_SOURCES = new Set(["emirates_updates", "etihad_advisory", "flydubai_updates"]);
-    if (source.parser === "html" && SCRAPING_ALLOWED_SOURCES.has(source.id) && isScrapingServiceAvailable()) {
-      try {
-        const scraped = await fetchViaScrapingService(source.url, { timeoutMs: 25_000 });
-        html = scraped.html;
-        sourceUrl = scraped.sourceUrl;
+
+  // Airline SPAs: try ScrapingBee first (Jina returns page shell without dynamic content)
+  if (SCRAPING_PRIMARY_SOURCES.has(source.id) && isScrapingServiceAvailable()) {
+    try {
+      const scraped = await fetchViaScrapingService(source.url, { timeoutMs: 25_000 });
+      html = scraped.html;
+      sourceUrl = scraped.sourceUrl;
+      method = "relay";
+      httpStatus = 200;
+    } catch {
+      // fall through to standard fetch chain
+    }
+  }
+
+  if (!html) {
+    try {
+      const direct = await fetchTextWithFallback([...getPrimaryUrls(source), ...getFallbackUrls(source)], "html");
+      html = direct.text;
+      sourceUrl = direct.finalUrl;
+      httpStatus = direct.status;
+      if (direct.fromMirror) method = "relay";
+    } catch (error) {
+      let recovered = false;
+      if (!recovered && source.fallback_connector === "chrome_relay") {
+        const relayed = await fetchViaChromeRelay(source.url);
+        html = relayed.html;
+        sourceUrl = relayed.sourceUrl;
         method = "relay";
         httpStatus = 200;
         recovered = true;
-      } catch {
-        // fall through to chrome relay
       }
-    }
-    if (!recovered && source.fallback_connector === "chrome_relay") {
-      const relayed = await fetchViaChromeRelay(source.url);
-      html = relayed.html;
-      sourceUrl = relayed.sourceUrl;
-      method = "relay";
-      httpStatus = 200;
-      recovered = true;
-    }
-    if (!recovered) {
-      throw error;
+      if (!recovered) {
+        throw error;
+      }
     }
   }
 

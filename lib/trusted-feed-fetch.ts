@@ -27,7 +27,10 @@ const BROWSERISH_HEADERS: Record<string, string> = {
 };
 const FETCH_TIMEOUT_MS = Number(process.env.TRUSTED_FEED_FETCH_TIMEOUT_MS ?? 20_000);
 
-const JINA_FIRST_SOURCES = new Set(["uae_mofa", "gcaa_uae", "emirates_updates", "etihad_advisory", "flydubai_updates"]);
+const JINA_FIRST_SOURCES = new Set(["uae_mofa", "gcaa_uae"]);
+
+// Airline SPAs return shell HTML via Jina (false positive) — use ScrapingBee as primary
+const SCRAPING_PRIMARY_SOURCES = new Set(["emirates_updates", "etihad_advisory", "flydubai_updates"]);
 
 function asJinaMirror(url: string): string {
   return `https://r.jina.ai/http://${url.replace(/^https?:\/\//, "")}`;
@@ -76,8 +79,33 @@ function classifyError(errorText: string): string {
 export async function fetchTrustedSourceDocument(source: SourceDef): Promise<FetchStageResult> {
   const startedAt = Date.now();
   const mode = source.parser;
-  const urls = getCandidateUrls(source);
   let lastError: unknown = null;
+
+  // Airline SPAs: try ScrapingBee first (Jina returns page shell without dynamic content)
+  if (SCRAPING_PRIMARY_SOURCES.has(source.id) && isScrapingServiceAvailable()) {
+    const remainingMs = 55_000 - (Date.now() - startedAt);
+    if (remainingMs > 8_000) {
+      try {
+        const scraped = await fetchViaScrapingService(source.url, { timeoutMs: Math.min(25_000, remainingMs - 3_000) });
+        return {
+          fetch_status: "success",
+          http_status: 200,
+          source_url: scraped.sourceUrl,
+          artifact_url: `scrapingbee:${source.url}`,
+          content_type: "html",
+          raw_text: scraped.html.slice(0, 120000),
+          normalized_text: normalizeText(scraped.html),
+          error_code: null,
+          error_detail: null,
+          duration_ms: Date.now() - startedAt,
+        };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+
+  const urls = getCandidateUrls(source);
 
   for (const candidate of urls) {
     const fromMirror = candidate.startsWith("https://r.jina.ai/");
@@ -114,32 +142,6 @@ export async function fetchTrustedSourceDocument(source: SourceDef): Promise<Fet
       };
     } catch (error) {
       lastError = error;
-    }
-  }
-
-  // Scraping service fallback — gated to failing airline SPAs only
-  const SCRAPING_ALLOWED_SOURCES = new Set(["emirates_updates", "etihad_advisory", "flydubai_updates"]);
-  if (source.parser === "html" && SCRAPING_ALLOWED_SOURCES.has(source.id) && isScrapingServiceAvailable()) {
-    const elapsedMs = Date.now() - startedAt;
-    const remainingMs = 55_000 - elapsedMs;
-    if (remainingMs > 8_000) {
-      try {
-        const scraped = await fetchViaScrapingService(source.url, { timeoutMs: Math.min(25_000, remainingMs - 3_000) });
-        return {
-          fetch_status: "success",
-          http_status: 200,
-          source_url: scraped.sourceUrl,
-          artifact_url: `scrapingbee:${source.url}`,
-          content_type: "html",
-          raw_text: scraped.html.slice(0, 120000),
-          normalized_text: normalizeText(scraped.html),
-          error_code: null,
-          error_detail: null,
-          duration_ms: Date.now() - startedAt,
-        };
-      } catch (error) {
-        lastError = error;
-      }
     }
   }
 

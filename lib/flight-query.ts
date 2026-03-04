@@ -4,7 +4,7 @@ import OpenAI from "openai";
 
 export type FlightIntent =
   | { type: "flight_number"; flightNumber: string }
-  | { type: "route"; originCodes: string[]; destinationCodes: string[]; originLabel: string; destinationLabel: string }
+  | { type: "route"; originCodes: string[]; destinationCodes: string[]; originLabel: string; destinationLabel: string; airline?: { icao: string; iataPrefix: string } }
   | { type: "unknown" };
 
 export type FlightInsight = {
@@ -74,6 +74,29 @@ const AIRPORT_ALIASES: Record<string, string[]> = {
   cai: ["CAI"], cairo: ["CAI"],
 };
 
+const KNOWN_IATA = new Set<string>(Object.values(AIRPORT_ALIASES).flat());
+
+const AIRLINE_KEYWORDS: Record<string, { icao: string; iataPrefix: string }> = {
+  emirates: { icao: "UAE", iataPrefix: "EK" },
+  etihad: { icao: "ETD", iataPrefix: "EY" },
+  flydubai: { icao: "FDB", iataPrefix: "FZ" },
+  "fly dubai": { icao: "FDB", iataPrefix: "FZ" },
+  "air arabia": { icao: "ABY", iataPrefix: "G9" },
+  saudia: { icao: "SVA", iataPrefix: "SV" },
+  "qatar airways": { icao: "QTR", iataPrefix: "QR" },
+  "oman air": { icao: "OMA", iataPrefix: "WY" },
+  "gulf air": { icao: "GFA", iataPrefix: "GF" },
+  "british airways": { icao: "BAW", iataPrefix: "BA" },
+};
+
+function detectAirline(query: string): { icao: string; iataPrefix: string } | undefined {
+  const lower = query.toLowerCase();
+  for (const [keyword, info] of Object.entries(AIRLINE_KEYWORDS)) {
+    if (lower.includes(keyword)) return info;
+  }
+  return undefined;
+}
+
 function cleanToken(raw: string): string {
   return raw.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -112,25 +135,29 @@ export function parseFlightIntent(query: string): FlightIntent {
     return { type: "flight_number", flightNumber: flightMatch[1].replace(/\s+/g, "") };
   }
 
+  const airline = detectAirline(trimmed);
+
   const routeArrow = upper.match(/\b([A-Z]{3})\s*(?:-|TO|->|→)\s*([A-Z]{3})\b/);
-  if (routeArrow) {
+  if (routeArrow && KNOWN_IATA.has(routeArrow[1]) && KNOWN_IATA.has(routeArrow[2])) {
     return {
       type: "route",
       originCodes: [routeArrow[1]],
       destinationCodes: [routeArrow[2]],
       originLabel: routeArrow[1],
       destinationLabel: routeArrow[2],
+      airline,
     };
   }
 
   const routeFromToIata = upper.match(/\bFROM\s+([A-Z]{3})\s+TO\s+([A-Z]{3})\b/);
-  if (routeFromToIata) {
+  if (routeFromToIata && KNOWN_IATA.has(routeFromToIata[1]) && KNOWN_IATA.has(routeFromToIata[2])) {
     return {
       type: "route",
       originCodes: [routeFromToIata[1]],
       destinationCodes: [routeFromToIata[2]],
       originLabel: routeFromToIata[1],
       destinationLabel: routeFromToIata[2],
+      airline,
     };
   }
 
@@ -145,6 +172,7 @@ export function parseFlightIntent(query: string): FlightIntent {
         destinationCodes: destination.codes,
         originLabel: origin.label,
         destinationLabel: destination.label,
+        airline,
       };
     }
   }
@@ -160,8 +188,37 @@ export function parseFlightIntent(query: string): FlightIntent {
         destinationCodes: destination.codes,
         originLabel: origin.label,
         destinationLabel: destination.label,
+        airline,
       };
     }
+  }
+
+  // Fallback: scan for any known IATA codes in the query
+  const iataCodes: string[] = [];
+  for (const match of upper.matchAll(/\b([A-Z]{3})\b/g)) {
+    if (KNOWN_IATA.has(match[1]) && !iataCodes.includes(match[1])) {
+      iataCodes.push(match[1]);
+    }
+  }
+  if (iataCodes.length >= 2) {
+    return {
+      type: "route",
+      originCodes: [iataCodes[0]],
+      destinationCodes: [iataCodes[1]],
+      originLabel: iataCodes[0],
+      destinationLabel: iataCodes[1],
+      airline,
+    };
+  }
+  if (iataCodes.length === 1) {
+    return {
+      type: "route",
+      originCodes: [iataCodes[0]],
+      destinationCodes: [iataCodes[0]],
+      originLabel: iataCodes[0],
+      destinationLabel: iataCodes[0],
+      airline,
+    };
   }
 
   return { type: "unknown" };
@@ -282,6 +339,9 @@ async function lookupFromDb(intent: FlightIntent, lookbackHours: number): Promis
     query = query.eq("flight_number", intent.flightNumber);
   } else {
     query = query.in("origin_iata", intent.originCodes).in("destination_iata", intent.destinationCodes);
+    if (intent.airline) {
+      query = query.or(`airline.eq.${intent.airline.icao},flight_number.like.${intent.airline.iataPrefix}%`);
+    }
   }
 
   const { data, error } = await query;
@@ -415,7 +475,7 @@ export async function runFlightQuery(queryText: string, options?: QueryOptions) 
 
   const likelihoodMode = isLikelihoodQuestion(query);
   const horizon = parseHorizonHours(query);
-  const lookbackHours = likelihoodMode ? Math.max(24, horizon) : 3;
+  const lookbackHours = likelihoodMode ? Math.max(24, horizon) : 12;
 
   let flights = await lookupFromDb(intent, lookbackHours);
   let source: "cache" | "live" = "cache";

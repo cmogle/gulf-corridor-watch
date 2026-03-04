@@ -156,9 +156,19 @@ export function UpdatesFeed({ initialItems }: { initialItems: UnifiedUpdateItem[
                   </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                     <span className={`rounded-full px-2 py-0.5 ${
-                      item.update_type === "snapshot" ? "bg-blue-100 text-blue-800" : "bg-indigo-100 text-indigo-800"
+                      item.update_type === "snapshot"
+                        ? item.source_id.startsWith("gn_")
+                          ? "bg-amber-100 text-amber-800"
+                          : "bg-blue-100 text-blue-800"
+                        : item.update_type === "news"
+                          ? "bg-amber-100 text-amber-800"
+                          : "bg-indigo-100 text-indigo-800"
                     }`}>
-                      {item.update_type === "snapshot" ? "Official" : "Official X"}
+                      {item.update_type === "snapshot"
+                        ? item.source_id.startsWith("gn_") ? "News" : "Official"
+                        : item.update_type === "news"
+                          ? "Article"
+                          : "Official X"}
                     </span>
                     {item.validation_state === "validated" && (
                       <span className="rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-800">Verified</span>

@@ -22,7 +22,8 @@ function isFreshData(latest_fetch: string | null): boolean {
 }
 
 function deriveState(summary: NetworkSummary): OpState {
-  if (summary.active_flights_now === 0 && isFreshData(summary.latest_fetch)) return "shutdown";
+  // Shutdown: zero flights with either fresh confirmation OR total cessation (0% stability = no activity over 6h window)
+  if (summary.active_flights_now === 0 && (isFreshData(summary.latest_fetch) || summary.route_stability_6h === 0)) return "shutdown";
   if (summary.route_stability_6h >= 70) return "normal";
   if (summary.route_stability_6h >= 30) return "thinned";
   return "critical";

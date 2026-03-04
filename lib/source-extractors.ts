@@ -10,7 +10,7 @@ type HtmlExtractResult = {
   unusable: boolean;
 };
 
-function decodeEntities(input: string): string {
+export function decodeEntities(input: string): string {
   return input
     .replace(/&nbsp;|&#160;/gi, " ")
     .replace(/&amp;/gi, "&")

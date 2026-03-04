@@ -71,6 +71,15 @@ test("pickBestRssItemsScored caps at maxItems", () => {
   assert.equal(result.length, 3);
 });
 
+test("formatRssSummary decodes HTML entities in descriptions", () => {
+  const result = formatRssSummary([
+    { title: "Dubai Update", description: "Airport open&nbsp;&nbsp;Emirates confirms", score: 1 },
+  ]);
+  assert.ok(!result.summary.includes("&nbsp;"), "should not contain &nbsp;");
+  assert.ok(result.summary.includes("Airport open"), "should preserve text before entity");
+  assert.ok(result.summary.includes("Emirates confirms"), "should preserve text after entity");
+});
+
 test("ingestSingleSource is exported as a function", () => {
   assert.equal(typeof ingestSingleSource, "function");
 });

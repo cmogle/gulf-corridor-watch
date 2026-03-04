@@ -5,7 +5,7 @@ import { ingestAirports } from "./flightradar";
 import { ingestAirportsOpenSky } from "./opensky";
 import { fetchViaChromeRelay } from "./chrome-relay";
 import { pollOfficialXSignals } from "./x-signals";
-import { extractHtmlSnapshot, stripJinaPrefix, stripMarkdown } from "./source-extractors";
+import { extractHtmlSnapshot, stripJinaPrefix, stripMarkdown, decodeEntities } from "./source-extractors";
 import {
   computeUpdateContentHash,
   getValidationMaxPerIngest,
@@ -232,7 +232,7 @@ type ScoredRssItem = { title: string; description: string; score: number };
 export function formatRssSummary(items: ScoredRssItem[]): { title: string; summary: string; isBulletList: boolean } {
   if (items.length === 0) return { title: "", summary: "", isBulletList: false };
 
-  const cleanDesc = (desc: string) => desc.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 150);
+  const cleanDesc = (desc: string) => decodeEntities(desc.replace(/<[^>]+>/g, " ")).slice(0, 150);
 
   if (items.length === 1) {
     const item = items[0];

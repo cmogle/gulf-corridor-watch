@@ -13,6 +13,8 @@ type Props = {
   edges: NetworkEdge[];
   hoveredEdge: string | null;
   onHoverEdge: (key: string | null) => void;
+  onClickNode?: (iata: string) => void;
+  onClickEdge?: (from: string, to: string) => void;
 };
 
 /* ------------------------------------------------------------------ */
@@ -129,7 +131,7 @@ function edgeKey(edge: NetworkEdge): string {
   return `${edge.from}->${edge.to}`;
 }
 
-export function AtlasCanvas({ nodes, edges, hoveredEdge, onHoverEdge }: Props) {
+export function AtlasCanvas({ nodes, edges, hoveredEdge, onHoverEdge, onClickNode, onClickEdge }: Props) {
   const nodeMap = new Map(nodes.map((n) => [n.iata, n]));
 
   return (
@@ -208,6 +210,7 @@ export function AtlasCanvas({ nodes, edges, hoveredEdge, onHoverEdge }: Props) {
                 className="cursor-pointer"
                 onMouseEnter={() => onHoverEdge(key)}
                 onMouseLeave={() => onHoverEdge(null)}
+                onClick={() => onClickEdge?.(edge.from, edge.to)}
                 style={{ transition: "opacity 0.2s ease" }}
               >
                 {/* Shadow/glow on hover */}
@@ -295,7 +298,7 @@ export function AtlasCanvas({ nodes, edges, hoveredEdge, onHoverEdge }: Props) {
             const isInactive = activity === 0;
 
             return (
-              <g key={node.iata}>
+              <g key={node.iata} className="cursor-pointer" onClick={() => onClickNode?.(node.iata)}>
                 {/* Outer pulse ring for active hubs */}
                 {!isInactive && (
                   <circle

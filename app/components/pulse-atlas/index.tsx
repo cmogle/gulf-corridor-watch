@@ -6,6 +6,7 @@ import { filterEdges } from "./types";
 import { OperabilityBar } from "./operability-bar";
 import { AtlasCanvas } from "./atlas-canvas";
 import { RouteLadder } from "./route-ladder";
+import { useFlightDetail } from "@/app/components/flight-detail/context";
 
 const FILTERS: { key: AtlasFilter; label: string }[] = [
   { key: "all", label: "All Corridors" },
@@ -19,6 +20,7 @@ const FILTERS: { key: AtlasFilter; label: string }[] = [
 ];
 
 export function AirspacePulseAtlas() {
+  const { openAirport, openRoute } = useFlightDetail();
   const [network, setNetwork] = useState<FlightNetworkResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +112,8 @@ export function AirspacePulseAtlas() {
                 edges={filteredEdges}
                 hoveredEdge={hoveredEdge}
                 onHoverEdge={setHoveredEdge}
+                onClickNode={openAirport}
+                onClickEdge={openRoute}
               />
             </div>
             <div className="w-full md:w-[37%]">

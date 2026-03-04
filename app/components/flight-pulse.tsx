@@ -1,3 +1,5 @@
+"use client";
+
 type AirportPulse = {
   total: number;
   delayed: number;
@@ -10,6 +12,7 @@ type AirportCode = "DXB" | "AUH" | "DWC";
 type Props = {
   byAirport: Record<AirportCode, AirportPulse>;
   topRoutes: Array<{ route: string; count: number }>;
+  onClickAirport?: (code: string) => void;
 };
 
 const AIRPORT_META: Record<AirportCode, { label: string; suffix?: string }> = {
@@ -27,7 +30,7 @@ function relativeTime(iso: string | null): string {
   return `${Math.round(minutes / 60)}h ago`;
 }
 
-export function FlightPulse({ byAirport, topRoutes }: Props) {
+export function FlightPulse({ byAirport, topRoutes, onClickAirport }: Props) {
   return (
     <section className="mx-auto max-w-4xl px-4 py-8 md:px-0">
       <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
@@ -41,7 +44,8 @@ export function FlightPulse({ byAirport, topRoutes }: Props) {
           return (
             <article
               key={code}
-              className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+              onClick={() => onClickAirport?.(code)}
+              className="cursor-pointer rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-colors hover:border-[var(--primary-blue)] hover:bg-blue-50/30"
             >
               <h3 className="font-serif text-2xl">
                 {meta.label}

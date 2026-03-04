@@ -6,7 +6,8 @@ import { loadUnifiedFeed } from "@/lib/unified-updates";
 import { loadCurrentStateBrief } from "@/lib/current-state-brief";
 import { StatusHero } from "@/app/components/status-hero";
 import { SituationBriefing } from "@/app/components/situation-briefing";
-import { FlightPulse } from "@/app/components/flight-pulse";
+import { FlightDetailProvider } from "@/app/components/flight-detail/context";
+import { FlightPulseWithDetail } from "@/app/components/flight-detail/flight-pulse-wrapper";
 import { UpdatesFeed } from "@/app/components/updates-feed";
 import { TrustedUpdatesFeedV2 } from "@/app/components/trusted-updates-feed-v2";
 import { SourceHealthV2 } from "@/app/components/source-health-v2";
@@ -226,9 +227,11 @@ export default async function Home() {
         />
       )}
 
-      <AirspacePulseAtlas />
+      <FlightDetailProvider>
+        <AirspacePulseAtlas />
 
-      <FlightPulse byAirport={pulse.byAirport} topRoutes={pulse.topRoutes} />
+        <FlightPulseWithDetail byAirport={pulse.byAirport} topRoutes={pulse.topRoutes} />
+      </FlightDetailProvider>
 
       <UpdatesFeed initialItems={initialUpdates} />
 

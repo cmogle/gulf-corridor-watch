@@ -8,6 +8,7 @@
     { "path": "/api/ingest/flydubai_updates", "schedule": "*/5 * * * *" },
     { "path": "/api/ingest/gcaa_uae", "schedule": "*/5 * * * *" },
     { "path": "/api/ingest/rta_dubai", "schedule": "*/5 * * * *" },
+    { "path": "/api/ingest/heathrow_airport_x", "schedule": "*/5 * * * *" },
 
     { "path": "/api/ingest/uae_mofa", "schedule": "*/10 * * * *" },
     { "path": "/api/ingest/white_house_statements", "schedule": "*/10 * * * *" },
@@ -36,6 +37,7 @@
     { "path": "/api/ingest/gn_india_dubai_travel", "schedule": "*/15 * * * *" },
     { "path": "/api/ingest/uk_fcdo_iran", "schedule": "*/15 * * * *" },
 
+    { "path": "/api/ingest/flights", "schedule": "*/5 * * * *" },
     { "path": "/api/ingest/expert-feed", "schedule": "*/30 * * * *" },
     { "path": "/api/ingest", "schedule": "*/30 * * * *" }
   ],
@@ -50,6 +52,9 @@
       "maxDuration": 60
     },
     "app/api/chat/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/ingest/flights/route.ts": {
       "maxDuration": 60
     },
     "app/api/ingest/expert-feed/route.ts": {

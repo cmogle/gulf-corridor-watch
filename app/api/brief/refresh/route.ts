@@ -1,21 +1,13 @@
 import { refreshCurrentStateBrief } from "@/lib/current-state-brief";
 import { logLlmTelemetry } from "@/lib/llm-telemetry";
+import { isCronAuthorized } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   const startedAt = Date.now();
-  const params = new URL(req.url).searchParams;
-  const key = params.get("key");
-  const expectedSecret = process.env.BRIEF_SECRET ?? process.env.INGEST_SECRET;
-  const cronSecret = process.env.CRON_SECRET;
-  const bearer = req.headers.get("authorization")?.replace("Bearer ", "");
-  const authed =
-    !expectedSecret ||
-    key === expectedSecret ||
-    (cronSecret && bearer === cronSecret);
 
-  if (!authed) {
+  if (!isCronAuthorized(req)) {
     return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 

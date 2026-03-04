@@ -1,3 +1,5 @@
+import { getFeedBackend } from "@/lib/feed-backend";
+import { loadTrustedSourceHistory } from "@/lib/trusted-feed-repo";
 import { loadUnifiedSourceHistory } from "@/lib/unified-updates";
 
 function parseLimit(raw: string | null): number | undefined {
@@ -14,6 +16,12 @@ function parseBefore(raw: string | null): string | null {
   return new Date(t).toISOString();
 }
 
+function parseBool(raw: string | null): boolean {
+  if (!raw) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
 export async function GET(req: Request, ctx: { params: Promise<{ sourceId: string }> }) {
   try {
     const { sourceId } = await ctx.params;
@@ -22,6 +30,27 @@ export async function GET(req: Request, ctx: { params: Promise<{ sourceId: strin
     const url = new URL(req.url);
     const limit = parseLimit(url.searchParams.get("limit"));
     const before = parseBefore(url.searchParams.get("before"));
+    const backend = getFeedBackend();
+
+    if (backend === "v2") {
+      const includeFailures = parseBool(url.searchParams.get("include_failures"));
+      const result = await loadTrustedSourceHistory(sourceId, {
+        limit,
+        before,
+        include_failures: includeFailures,
+      });
+
+      return Response.json({
+        ok: true,
+        source_id: sourceId,
+        count: result.items.length,
+        next_before: result.next_before,
+        source_health: result.source_health,
+        items: result.items,
+        fetched_at: new Date().toISOString(),
+      });
+    }
+
     const result = await loadUnifiedSourceHistory(sourceId, { limit, before });
 
     return Response.json({

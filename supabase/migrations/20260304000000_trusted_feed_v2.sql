@@ -11,7 +11,9 @@ create table if not exists source_fetch_runs (
   duration_ms integer null,
   created_at timestamptz not null default now()
 );
+
 create index if not exists idx_source_fetch_runs_source_started on source_fetch_runs(source_id, started_at desc);
+
 create table if not exists source_documents (
   document_id uuid primary key default gen_random_uuid(),
   run_id uuid not null references source_fetch_runs(run_id) on delete cascade,
@@ -23,8 +25,10 @@ create table if not exists source_documents (
   source_url text not null,
   created_at timestamptz not null default now()
 );
+
 create index if not exists idx_source_documents_source_fetched on source_documents(source_id, fetched_at desc);
 create index if not exists idx_source_documents_run on source_documents(run_id);
+
 create table if not exists source_events_v2 (
   event_id uuid primary key default gen_random_uuid(),
   source_id text not null,
@@ -43,11 +47,13 @@ create table if not exists source_events_v2 (
   status_level text not null default 'unknown' check (status_level in ('normal','advisory','disrupted','unknown')),
   created_at timestamptz not null default now()
 );
+
 create index if not exists idx_source_events_v2_source_time on source_events_v2(source_id, event_time desc);
 create index if not exists idx_source_events_v2_quality_time on source_events_v2(quality_state, event_time desc);
 create unique index if not exists idx_source_events_v2_published_dedupe
   on source_events_v2(source_id, event_hash)
   where quality_state = 'published';
+
 create table if not exists source_health_v2 (
   source_id text primary key,
   latest_run_at timestamptz null,
@@ -58,7 +64,9 @@ create table if not exists source_health_v2 (
   health_reason text null,
   updated_at timestamptz not null default now()
 );
+
 create index if not exists idx_source_health_v2_state_updated on source_health_v2(health_state, updated_at desc);
+
 create table if not exists feed_baseline_metrics (
   id uuid primary key default gen_random_uuid(),
   backend text not null check (backend in ('v1','v2')),
@@ -70,8 +78,11 @@ create table if not exists feed_baseline_metrics (
   published_count integer not null default 0,
   notes jsonb not null default '{}'::jsonb
 );
+
 create index if not exists idx_feed_baseline_metrics_backend_captured on feed_baseline_metrics(backend, captured_at desc);
+
 drop view if exists trusted_feed_published_v2;
+
 create view trusted_feed_published_v2 as
 select
   e.event_id::text as id,

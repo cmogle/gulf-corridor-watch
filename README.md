@@ -77,6 +77,8 @@ GPT_CONTEXT_FRESHNESS_MULTIPLIER=3
 GPT_CONTEXT_MAX_SOURCES=12
 GPT_CONTEXT_MAX_SOCIAL_AGE_MINUTES=240
 GPT_CONTEXT_MAX_SOCIAL=8
+# feed backend mode: "v1" (legacy) or "v2" (strict trusted publish pipeline)
+FEED_BACKEND=v1
 ```
 
 4) Start locally
@@ -140,6 +142,24 @@ npm run dev
 - `GET /api/updates/source/:sourceId?limit=25&before=<iso>`
   - provider-specific reverse-chronological timeline
   - supports cursor pagination via `before`
+
+### Trusted Feed v2 APIs (when `FEED_BACKEND=v2`)
+- `GET /api/updates/feed?limit=80`
+  - returns only `quality_state=published` events from `source_events_v2`
+  - adds `run_id`, `evidence_excerpt`, `quality_state`, `quality_reason`, `published_at`
+- `GET /api/updates/source/:sourceId?limit=25&before=<iso>&include_failures=true`
+  - defaults to published-only history; add `include_failures=true` for rejected diagnostics
+  - includes `source_health` block in response
+- `GET /api/sources/health`
+  - per-source health summary: latest run/success/publish, failure streak, reason
+- `GET /api/metrics/baseline?key=<INGEST_SECRET>`
+  - records v1 and v2 baseline metrics into `feed_baseline_metrics`
+
+### Trusted Feed v2 maintenance scripts
+- `DRY_RUN=1 npx tsx --env-file=.env.local scripts/reclassify-trusted-feed-v2.ts`
+  - previews legacy `quality_state='published'` rows that now fail strict relevance/recency
+- `npx tsx --env-file=.env.local scripts/reclassify-trusted-feed-v2.ts`
+  - demotes those rows to rejected and refreshes `source_health_v2.last_publish_at`
 
 ## Tracking APIs (auth-gated sync phase)
 - `GET /api/tracking`

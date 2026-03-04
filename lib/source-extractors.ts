@@ -153,13 +153,23 @@ function readJinaHeadings(text: string, limit = 12): string[] {
   return out;
 }
 
+function isLikelyChromeText(text: string): boolean {
+  const t = sanitizeSourceText(text).toLowerCase();
+  if (!t) return true;
+  if (t.length < 12) return true;
+  if (/^(menu|home|search|login|register|contact us|sitemap|skip to)/.test(t)) return true;
+  if (/(book a flight|book now|manage booking|frequently asked questions|what are you looking for)/.test(t)) return true;
+  if (/(english.*العربية|children travelling alone|the extraordinary challenge|route map holiday inspiration)/.test(t)) return true;
+  return false;
+}
+
 function readTagTexts(html: string, tag: "h1" | "h2" | "h3" | "p", limit = 12): string[] {
   const out: string[] = [];
   const pattern = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "gi");
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(html)) && out.length < limit) {
     const cleaned = sanitizeSourceText(decodeEntities(match[1].replace(/<[^>]+>/g, " ")));
-    if (cleaned.length >= 16) out.push(cleaned);
+    if (cleaned.length >= 16 && !isLikelyChromeText(cleaned)) out.push(cleaned);
   }
   return out;
 }
@@ -171,6 +181,7 @@ function readAnchorsWithKeywords(html: string, keywords: string[], limit = 10): 
   while ((match = pattern.exec(html)) && out.length < limit) {
     const cleaned = sanitizeSourceText(decodeEntities(match[1].replace(/<[^>]+>/g, " ")));
     if (cleaned.length < 18) continue;
+    if (isLikelyChromeText(cleaned)) continue;
     const lower = cleaned.toLowerCase();
     if (keywords.some((k) => lower.includes(k))) out.push(cleaned);
   }
@@ -230,10 +241,11 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
     const title = readMeta(html, "og:title") ?? readMeta(html, "section") ?? base.pageTitle;
     const summary = selectSummary(
       [
+        ...readTagTexts(cleaned, "h1", 2),
+        ...readTagTexts(cleaned, "h2", 8),
+        ...readAnchorsWithKeywords(cleaned, ["delay", "cancel", "suspend", "closure", "airspace", "update"], 6),
         readMeta(html, "description"),
         readMeta(html, "og:description"),
-        ...readTagTexts(cleaned, "h1", 2),
-        ...readTagTexts(cleaned, "h2", 4),
       ],
       base.rawText,
     );
@@ -258,10 +270,40 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
     const title = readMeta(html, "og:title") ?? base.pageTitle;
     const summary = selectSummary(
       [
+        ...readTagTexts(cleaned, "h2", 8),
+        ...readAnchorsWithKeywords(cleaned, ["delay", "cancel", "suspend", "travel update", "advisory", "airspace"], 8),
         readMeta(html, "description"),
         readMeta(html, "og:description"),
-        ...readTagTexts(cleaned, "h2", 4),
-        ...readAnchorsWithKeywords(cleaned, ["travel", "advisory", "update", "flight", "service"], 5),
+      ],
+      base.rawText,
+    );
+    return { title, summary, publishedAt: base.publishedAt, rawText: base.rawText };
+  }
+
+  if (source.extractor_id === "flydubai_updates") {
+    const title = readMeta(html, "og:title") ?? base.pageTitle;
+    const summary = selectSummary(
+      [
+        ...readTagTexts(cleaned, "h1", 3),
+        ...readTagTexts(cleaned, "h2", 8),
+        ...readAnchorsWithKeywords(cleaned, ["delay", "cancel", "disruption", "suspend", "airspace", "travel update"], 8),
+        readMeta(html, "description"),
+        readMeta(html, "og:description"),
+      ],
+      base.rawText,
+    );
+    return { title, summary, publishedAt: base.publishedAt, rawText: base.rawText };
+  }
+
+  if (source.extractor_id === "air_arabia_updates") {
+    const title = readMeta(html, "og:title") ?? base.pageTitle;
+    const summary = selectSummary(
+      [
+        ...readTagTexts(cleaned, "h1", 3),
+        ...readTagTexts(cleaned, "h2", 8),
+        ...readAnchorsWithKeywords(cleaned, ["delay", "cancel", "disruption", "suspend", "travel alert", "airspace"], 8),
+        readMeta(html, "description"),
+        readMeta(html, "og:description"),
       ],
       base.rawText,
     );

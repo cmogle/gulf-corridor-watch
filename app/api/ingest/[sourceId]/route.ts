@@ -1,31 +1,46 @@
+import { getFeedBackend } from "@/lib/feed-backend";
 import { OFFICIAL_SOURCES } from "@/lib/sources";
 import { ingestSingleSource } from "@/lib/ingest";
+import { ingestTrustedSourceById } from "@/lib/trusted-feed-ingest";
+import { isCronAuthorized } from "@/lib/cron-auth";
 
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ sourceId: string }> },
 ) {
   const { sourceId } = await params;
-  const key = new URL(req.url).searchParams.get("key");
-  const cronSecret = process.env.CRON_SECRET;
-  const bearer = req.headers.get("authorization")?.replace("Bearer ", "");
-  const authed =
-    !process.env.INGEST_SECRET ||
-    key === process.env.INGEST_SECRET ||
-    (cronSecret && bearer === cronSecret);
 
-  if (!authed) {
+  if (!isCronAuthorized(req)) {
     return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const source = OFFICIAL_SOURCES.find((s) => s.id === sourceId);
-  if (!source) {
-    return Response.json({ ok: false, error: `Unknown source: ${sourceId}` }, { status: 404 });
-  }
-
   try {
+    if (getFeedBackend() === "v2") {
+      const result = await ingestTrustedSourceById(sourceId);
+      if (result.fetch_error_code === "unknown_source") {
+        return Response.json({ ok: false, error: `Unknown source: ${sourceId}` }, { status: 404 });
+      }
+      return Response.json({
+        ok: true,
+        source_id: sourceId,
+        run_id: result.run_id,
+        fetch_status: result.fetch_status,
+        fetch_error_code: result.fetch_error_code,
+        published_count: result.published_count,
+        rejected_count: result.rejected_count,
+        health_state: result.health_state,
+        skipped: result.skipped ?? false,
+        reason: result.reason ?? null,
+      });
+    }
+
+    const source = OFFICIAL_SOURCES.find((s) => s.id === sourceId);
+    if (!source) {
+      return Response.json({ ok: false, error: `Unknown source: ${sourceId}` }, { status: 404 });
+    }
+
     const result = await ingestSingleSource(source);
     return Response.json({
       ok: true,
@@ -35,6 +50,6 @@ export async function GET(
       summary_preview: result.snapshot.summary.slice(0, 200),
     });
   } catch (error) {
-    return Response.json({ ok: false, source_id: source.id, error: String(error) }, { status: 500 });
+    return Response.json({ ok: false, source_id: sourceId, error: String(error) }, { status: 500 });
   }
 }

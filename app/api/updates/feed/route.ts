@@ -1,3 +1,5 @@
+import { getFeedBackend } from "@/lib/feed-backend";
+import { loadTrustedFeed } from "@/lib/trusted-feed-repo";
 import { loadUnifiedFeed } from "@/lib/unified-updates";
 
 function parseLimit(raw: string | null): number | undefined {
@@ -11,7 +13,8 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const limit = parseLimit(url.searchParams.get("limit"));
-    const items = await loadUnifiedFeed(limit);
+    const backend = getFeedBackend();
+    const items = backend === "v2" ? await loadTrustedFeed(limit) : await loadUnifiedFeed(limit);
     return Response.json({ ok: true, count: items.length, items, fetched_at: new Date().toISOString() });
   } catch (error) {
     return Response.json({ ok: false, error: String(error) }, { status: 500 });

@@ -1,9 +1,8 @@
 import { runExpertFeedIngestion } from "@/lib/expert-feed-ingest";
+import { isCronAuthorized } from "@/lib/cron-auth";
 
 export async function GET(req: Request) {
-  const params = new URL(req.url).searchParams;
-  const key = params.get("key");
-  if (process.env.INGEST_SECRET && key !== process.env.INGEST_SECRET) {
+  if (!isCronAuthorized(req)) {
     return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 

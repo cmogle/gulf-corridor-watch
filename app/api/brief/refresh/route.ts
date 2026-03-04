@@ -8,8 +8,14 @@ export async function GET(req: Request) {
   const params = new URL(req.url).searchParams;
   const key = params.get("key");
   const expectedSecret = process.env.BRIEF_SECRET ?? process.env.INGEST_SECRET;
+  const cronSecret = process.env.CRON_SECRET;
+  const bearer = req.headers.get("authorization")?.replace("Bearer ", "");
+  const authed =
+    !expectedSecret ||
+    key === expectedSecret ||
+    (cronSecret && bearer === cronSecret);
 
-  if (expectedSecret && key !== expectedSecret) {
+  if (!authed) {
     return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 

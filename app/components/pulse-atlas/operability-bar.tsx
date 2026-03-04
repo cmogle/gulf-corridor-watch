@@ -13,9 +13,16 @@ function relativeTime(iso: string | null): string {
   return `${Math.round(minutes / 60)}h ago`;
 }
 
-type OpState = "normal" | "thinned" | "critical";
+type OpState = "normal" | "thinned" | "critical" | "shutdown";
+
+function isFreshData(latest_fetch: string | null): boolean {
+  if (!latest_fetch) return false;
+  const ageMs = Date.now() - new Date(latest_fetch).getTime();
+  return ageMs < 30 * 60_000;
+}
 
 function deriveState(summary: NetworkSummary): OpState {
+  if (summary.active_flights_now === 0 && isFreshData(summary.latest_fetch)) return "shutdown";
   if (summary.route_stability_6h >= 70) return "normal";
   if (summary.route_stability_6h >= 30) return "thinned";
   return "critical";
@@ -25,6 +32,7 @@ const STATE_STYLES: Record<OpState, { border: string; dot: string; label: string
   normal:   { border: "border-l-[var(--green)]", dot: "bg-[var(--green)]", label: "Corridors Normal" },
   thinned:  { border: "border-l-[var(--amber)]", dot: "bg-[var(--amber)]", label: "Traffic Thinned" },
   critical: { border: "border-l-[var(--red)]",   dot: "bg-[var(--red)]",   label: "Traffic Critical" },
+  shutdown: { border: "border-l-[var(--red)]",   dot: "bg-[var(--red)]",   label: "No Aircraft Detected" },
 };
 
 export function OperabilityBar({ summary }: Props) {
@@ -60,6 +68,12 @@ export function OperabilityBar({ summary }: Props) {
           </span>
         </div>
       </div>
+
+      {state === "shutdown" && (
+        <p className="mt-2 text-xs text-[var(--red)]">
+          No aircraft detected in monitored airspace. This may indicate airspace closure or major disruption.
+        </p>
+      )}
     </div>
   );
 }

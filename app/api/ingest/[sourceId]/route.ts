@@ -1,7 +1,7 @@
 import { getFeedBackend } from "@/lib/feed-backend";
 import { OFFICIAL_SOURCES } from "@/lib/sources";
 import { ingestSingleSource } from "@/lib/ingest";
-import { ingestTrustedSourceById } from "@/lib/trusted-feed-ingest";
+import { ingestTrustedSourceById, isXSourceId } from "@/lib/trusted-feed-ingest";
 import { isCronAuthorized } from "@/lib/cron-auth";
 
 export const maxDuration = 60;
@@ -17,7 +17,8 @@ export async function GET(
   }
 
   try {
-    if (getFeedBackend() === "v2") {
+    // X sources always go through V2 trusted feed (they don't exist in OFFICIAL_SOURCES)
+    if (getFeedBackend() === "v2" || isXSourceId(sourceId)) {
       const result = await ingestTrustedSourceById(sourceId);
       if (result.fetch_error_code === "unknown_source") {
         return Response.json({ ok: false, error: `Unknown source: ${sourceId}` }, { status: 404 });

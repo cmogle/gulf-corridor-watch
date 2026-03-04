@@ -68,6 +68,11 @@ const X_SOURCE_DEFS: Record<string, SourceDef> = {
   },
 };
 
+/** Check whether a sourceId is an X-based source (used for routing) */
+export function isXSourceId(sourceId: string): boolean {
+  return sourceId in X_SOURCE_DEFS;
+}
+
 export type TrustedSourceIngestResult = {
   source_id: string;
   run_id: string;

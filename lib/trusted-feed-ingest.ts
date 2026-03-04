@@ -13,19 +13,59 @@ import {
 import { computeTrustedEventHash, inferTrustedStatusLevel, qualifyTrustedCandidate, type TrustedCandidateEvent } from "./trusted-feed-quality";
 import { isTrustedFeedCoreSource, TRUSTED_FEED_CORE_SOURCE_IDS } from "./trusted-feed-core-sources";
 
-const HEATHROW_X_SOURCE_ID = "heathrow_airport_x";
-const HEATHROW_X_SOURCE: SourceDef = {
-  id: HEATHROW_X_SOURCE_ID,
-  name: "Heathrow Airport (Official X)",
-  category: "transport",
-  url: "https://x.com/HeathrowAirport",
-  parser: "html",
-  connector: "api",
-  extractor_id: "html_title_text",
-  priority: 97,
-  freshness_target_minutes: 5,
-  region: "UK",
-  x_handles: ["HeathrowAirport"],
+const X_SOURCE_DEFS: Record<string, SourceDef> = {
+  heathrow_airport_x: {
+    id: "heathrow_airport_x",
+    name: "Heathrow Airport (Official X)",
+    category: "transport",
+    url: "https://x.com/HeathrowAirport",
+    parser: "html",
+    connector: "api",
+    extractor_id: "html_title_text",
+    priority: 97,
+    freshness_target_minutes: 5,
+    region: "UK",
+    x_handles: ["HeathrowAirport"],
+  },
+  emirates_x: {
+    id: "emirates_x",
+    name: "Emirates (Official X)",
+    category: "airline",
+    url: "https://x.com/emirates",
+    parser: "html",
+    connector: "api",
+    extractor_id: "html_title_text",
+    priority: 100,
+    freshness_target_minutes: 5,
+    region: "UAE",
+    x_handles: ["emirates"],
+  },
+  etihad_x: {
+    id: "etihad_x",
+    name: "Etihad Airways (Official X)",
+    category: "airline",
+    url: "https://x.com/etihad",
+    parser: "html",
+    connector: "api",
+    extractor_id: "html_title_text",
+    priority: 98,
+    freshness_target_minutes: 5,
+    region: "UAE",
+    x_handles: ["etihad"],
+  },
+  flydubai_x: {
+    id: "flydubai_x",
+    name: "flydubai (Official X)",
+    category: "airline",
+    url: "https://x.com/flydubai",
+    parser: "html",
+    connector: "api",
+    extractor_id: "html_title_text",
+    priority: 95,
+    freshness_target_minutes: 5,
+    region: "UAE",
+    x_handles: ["flydubai"],
+  },
 };
 
 export type TrustedSourceIngestResult = {
@@ -153,14 +193,29 @@ function toHealthState(publishedCount: number, rejectedCount: number): "healthy"
   return "unknown";
 }
 
-async function ingestTrustedHeathrowX(): Promise<TrustedSourceIngestResult> {
-  const sourceId = HEATHROW_X_SOURCE_ID;
+async function ingestTrustedXSource(sourceId: string): Promise<TrustedSourceIngestResult> {
+  const sourceDef = X_SOURCE_DEFS[sourceId];
+  if (!sourceDef) {
+    return {
+      source_id: sourceId,
+      run_id: randomUUID(),
+      fetch_status: "failed",
+      fetch_error_code: "unknown_x_source",
+      published_count: 0,
+      rejected_count: 0,
+      health_state: "unknown",
+      skipped: true,
+      reason: `Unknown X source: ${sourceId}`,
+    };
+  }
+
+  const handle = sourceDef.x_handles?.[0] ?? sourceId;
   const runId = randomUUID();
   const startedAt = new Date().toISOString();
   logStage("source_ingest_started", { source_id: sourceId, run_id: runId, channel: "x" });
 
   try {
-    const signals = await pollOfficialXSignals([HEATHROW_X_SOURCE], { translateLimitPerHandle: 2 });
+    const signals = await pollOfficialXSignals([sourceDef], { translateLimitPerHandle: 2 });
     const completedAt = new Date().toISOString();
 
     await insertTrustedFetchRun({
@@ -172,7 +227,7 @@ async function ingestTrustedHeathrowX(): Promise<TrustedSourceIngestResult> {
       fetch_status: "success",
       error_code: null,
       error_detail: null,
-      artifact_url: HEATHROW_X_SOURCE.url,
+      artifact_url: sourceDef.url,
       duration_ms: Math.max(1, new Date(completedAt).getTime() - new Date(startedAt).getTime()),
     });
 
@@ -188,7 +243,7 @@ async function ingestTrustedHeathrowX(): Promise<TrustedSourceIngestResult> {
       raw_text: normalizedBundle,
       normalized_text: normalizedBundle,
       fetched_at: completedAt,
-      source_url: HEATHROW_X_SOURCE.url,
+      source_url: sourceDef.url,
     });
 
     const candidates: TrustedCandidateEvent[] = signals
@@ -214,8 +269,8 @@ async function ingestTrustedHeathrowX(): Promise<TrustedSourceIngestResult> {
       candidates,
       normalized_text: normalizedBundle,
       parse_threshold: 0.55,
-      fallback_url: HEATHROW_X_SOURCE.url,
-      fallback_headline: "@HeathrowAirport operational update",
+      fallback_url: sourceDef.url,
+      fallback_headline: `@${handle} operational update`,
       fallback_time: completedAt,
     });
 
@@ -261,7 +316,7 @@ async function ingestTrustedHeathrowX(): Promise<TrustedSourceIngestResult> {
       fetch_status: "failed",
       error_code: "x_poll_failed",
       error_detail: errDetail,
-      artifact_url: HEATHROW_X_SOURCE.url,
+      artifact_url: sourceDef.url,
       duration_ms: Math.max(1, new Date(completedAt).getTime() - new Date(startedAt).getTime()),
     });
 
@@ -406,8 +461,8 @@ export async function ingestTrustedSourceById(sourceId: string): Promise<Trusted
     };
   }
 
-  if (sourceId === HEATHROW_X_SOURCE_ID) {
-    return ingestTrustedHeathrowX();
+  if (sourceId in X_SOURCE_DEFS) {
+    return ingestTrustedXSource(sourceId);
   }
 
   const source = getSourceById(sourceId);

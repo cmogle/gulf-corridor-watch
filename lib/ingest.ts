@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "./supabase";
 import { ingestAirports } from "./flightradar";
 import { ingestAirportsOpenSky } from "./opensky";
 import { fetchViaChromeRelay } from "./chrome-relay";
+import { isScrapingServiceAvailable, fetchViaScrapingService } from "./scraping-service";
 import { pollOfficialXSignals } from "./x-signals";
 import { createHash } from "crypto";
 import { extractHtmlSnapshot, stripJinaPrefix, stripMarkdown, decodeEntities } from "./source-extractors";
@@ -159,7 +160,7 @@ const BROWSERISH_HEADERS: Record<string, string> = {
 };
 
 // Sources whose primary URL is a JS SPA — Jina reader should be tried first
-const JINA_FIRST_SOURCES = new Set(["visit_dubai_news", "india_mea", "india_immigration_boi", "uae_mofa"]);
+const JINA_FIRST_SOURCES = new Set(["visit_dubai_news", "india_mea", "india_immigration_boi", "uae_mofa", "emirates_updates", "etihad_advisory", "flydubai_updates"]);
 
 function getPrimaryUrls(source: SourceDef): string[] {
   if (JINA_FIRST_SOURCES.has(source.id)) {
@@ -488,13 +489,29 @@ async function fetchHtml(source: SourceDef): Promise<Snapshot> {
     httpStatus = direct.status;
     if (direct.fromMirror) method = "relay";
   } catch (error) {
-    if (source.fallback_connector === "chrome_relay") {
+    let recovered = false;
+    const SCRAPING_ALLOWED_SOURCES = new Set(["emirates_updates", "etihad_advisory", "flydubai_updates"]);
+    if (source.parser === "html" && SCRAPING_ALLOWED_SOURCES.has(source.id) && isScrapingServiceAvailable()) {
+      try {
+        const scraped = await fetchViaScrapingService(source.url, { timeoutMs: 25_000 });
+        html = scraped.html;
+        sourceUrl = scraped.sourceUrl;
+        method = "relay";
+        httpStatus = 200;
+        recovered = true;
+      } catch {
+        // fall through to chrome relay
+      }
+    }
+    if (!recovered && source.fallback_connector === "chrome_relay") {
       const relayed = await fetchViaChromeRelay(source.url);
       html = relayed.html;
       sourceUrl = relayed.sourceUrl;
       method = "relay";
       httpStatus = 200;
-    } else {
+      recovered = true;
+    }
+    if (!recovered) {
       throw error;
     }
   }

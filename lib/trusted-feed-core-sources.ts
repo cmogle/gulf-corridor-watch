@@ -5,6 +5,9 @@ export const TRUSTED_FEED_CORE_SOURCE_IDS = [
   "oman_air",
   "flydubai_updates",
   "heathrow_airport_x",
+  "emirates_x",
+  "etihad_x",
+  "flydubai_x",
 ] as const;
 
 export type TrustedFeedCoreSourceId = (typeof TRUSTED_FEED_CORE_SOURCE_IDS)[number];

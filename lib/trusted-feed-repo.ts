@@ -9,6 +9,9 @@ const CORE_SOURCE_SET = new Set<string>(TRUSTED_FEED_CORE_SOURCE_IDS);
 const FEED_MAX_EVENT_AGE_HOURS = Number(process.env.TRUSTED_FEED_MAX_EVENT_AGE_HOURS ?? 48);
 const TRUSTED_SOURCE_OVERRIDES = new Map([
   ["heathrow_airport_x", { name: "Heathrow Airport (Official X)", url: "https://x.com/HeathrowAirport" }],
+  ["emirates_x", { name: "Emirates (Official X)", url: "https://x.com/emirates" }],
+  ["etihad_x", { name: "Etihad Airways (Official X)", url: "https://x.com/etihad" }],
+  ["flydubai_x", { name: "flydubai (Official X)", url: "https://x.com/flydubai" }],
 ]);
 
 function sourceName(sourceId: string): string {

@@ -3,12 +3,15 @@
     { "path": "/api/brief/refresh", "schedule": "*/5 * * * *" },
     { "path": "/api/metrics/baseline", "schedule": "*/15 * * * *" },
 
-    { "path": "/api/ingest/emirates_updates", "schedule": "*/5 * * * *" },
-    { "path": "/api/ingest/etihad_advisory", "schedule": "*/5 * * * *" },
-    { "path": "/api/ingest/flydubai_updates", "schedule": "*/5 * * * *" },
+    { "path": "/api/ingest/emirates_updates", "schedule": "*/30 * * * *" },
+    { "path": "/api/ingest/etihad_advisory", "schedule": "*/30 * * * *" },
+    { "path": "/api/ingest/flydubai_updates", "schedule": "*/30 * * * *" },
     { "path": "/api/ingest/gcaa_uae", "schedule": "*/5 * * * *" },
     { "path": "/api/ingest/rta_dubai", "schedule": "*/5 * * * *" },
     { "path": "/api/ingest/heathrow_airport_x", "schedule": "*/5 * * * *" },
+    { "path": "/api/ingest/emirates_x", "schedule": "*/5 * * * *" },
+    { "path": "/api/ingest/etihad_x", "schedule": "*/5 * * * *" },
+    { "path": "/api/ingest/flydubai_x", "schedule": "*/5 * * * *" },
 
     { "path": "/api/ingest/uae_mofa", "schedule": "*/10 * * * *" },
     { "path": "/api/ingest/white_house_statements", "schedule": "*/10 * * * *" },

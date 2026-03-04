@@ -6,7 +6,7 @@
 
 const DEFAULT_BASE_URL = "https://fr24api.flightradar24.com";
 
-export type AirportCode = "DXB" | "AUH";
+export type AirportCode = "DXB" | "AUH" | "DWC";
 
 export type FlightObservation = {
   airport: AirportCode;
@@ -34,6 +34,7 @@ export type FlightObservation = {
 const AIRPORT_COORDS: Record<AirportCode, { lat: number; lon: number }> = {
   DXB: { lat: 25.2528, lon: 55.3644 },
   AUH: { lat: 24.4330, lon: 54.6511 },
+  DWC: { lat: 24.8960, lon: 55.1614 },
 };
 
 // Wide UAE/Gulf airspace bounding box: lat_max,lat_min,lon_min,lon_max
@@ -50,9 +51,13 @@ function distKm(lat1: number, lon1: number, lat2: number, lon2: number): number 
 }
 
 function nearestAirport(lat: number, lon: number): AirportCode {
-  const dDXB = distKm(lat, lon, AIRPORT_COORDS.DXB.lat, AIRPORT_COORDS.DXB.lon);
-  const dAUH = distKm(lat, lon, AIRPORT_COORDS.AUH.lat, AIRPORT_COORDS.AUH.lon);
-  return dDXB <= dAUH ? "DXB" : "AUH";
+  let best: AirportCode = "DXB";
+  let bestDist = Infinity;
+  for (const [code, coords] of Object.entries(AIRPORT_COORDS)) {
+    const d = distKm(lat, lon, coords.lat, coords.lon);
+    if (d < bestDist) { bestDist = d; best = code as AirportCode; }
+  }
+  return best;
 }
 
 type FR24Aircraft = {
@@ -154,13 +159,13 @@ export async function getAirportBoards(airport: AirportCode): Promise<FlightObse
 }
 
 export async function findFlightByNumber(flightNumber: string): Promise<FlightObservation[]> {
-  const all = await ingestAirports(["DXB", "AUH"]);
+  const all = await ingestAirports(["DXB", "AUH", "DWC"]);
   const fn = flightNumber.toUpperCase().replace(/\s+/g, "");
   return all.filter((r) => r.flight_number === fn || r.callsign === fn);
 }
 
 export async function findRouteFlights(originIata: string, destinationIata: string): Promise<FlightObservation[]> {
-  const all = await ingestAirports(["DXB", "AUH"]);
+  const all = await ingestAirports(["DXB", "AUH", "DWC"]);
   return all.filter(
     (r) => r.origin_iata === originIata.toUpperCase() && r.destination_iata === destinationIata.toUpperCase()
   );

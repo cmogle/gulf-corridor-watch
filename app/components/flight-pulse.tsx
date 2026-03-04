@@ -5,9 +5,17 @@ type AirportPulse = {
   latestFetch: string | null;
 };
 
+type AirportCode = "DXB" | "AUH" | "DWC";
+
 type Props = {
-  byAirport: Record<"DXB" | "AUH", AirportPulse>;
+  byAirport: Record<AirportCode, AirportPulse>;
   topRoutes: Array<{ route: string; count: number }>;
+};
+
+const AIRPORT_META: Record<AirportCode, { label: string; suffix?: string }> = {
+  DXB: { label: "DXB" },
+  AUH: { label: "AUH" },
+  DWC: { label: "DWC", suffix: "Cargo" },
 };
 
 function relativeTime(iso: string | null): string {
@@ -26,15 +34,21 @@ export function FlightPulse({ byAirport, topRoutes }: Props) {
         Flight Pulse
       </p>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        {(["DXB", "AUH"] as const).map((code) => {
-          const airport = byAirport[code];
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        {(["DXB", "AUH", "DWC"] as const).map((code) => {
+          const airport = byAirport[code] ?? { total: 0, delayed: 0, cancelled: 0, latestFetch: null };
+          const meta = AIRPORT_META[code];
           return (
             <article
               key={code}
               className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
             >
-              <h3 className="font-serif text-2xl">{code}</h3>
+              <h3 className="font-serif text-2xl">
+                {meta.label}
+                {meta.suffix && (
+                  <span className="ml-2 text-sm font-normal text-[var(--text-secondary)]">{meta.suffix}</span>
+                )}
+              </h3>
               <div className="mt-3 space-y-1 font-mono text-sm">
                 <p>
                   <span className="text-[var(--text-secondary)]">Tracked</span>{" "}

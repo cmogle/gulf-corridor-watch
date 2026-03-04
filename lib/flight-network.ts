@@ -13,7 +13,7 @@ import { classifyAircraftType, type AircraftFamily } from "@/lib/aircraft-family
 /*  Hub definitions                                                    */
 /* ------------------------------------------------------------------ */
 
-export type HubRegion = "me" | "india";
+export type HubRegion = "me" | "india" | "uk" | "europe" | "americas" | "asia_pac";
 
 export type HubDef = {
   iata: string;
@@ -27,12 +27,27 @@ export const HUBS: HubDef[] = [
   // Middle East
   { iata: "DXB", label: "Dubai", lat: 25.253, lon: 55.364, region: "me" },
   { iata: "AUH", label: "Abu Dhabi", lat: 24.433, lon: 54.651, region: "me" },
+  { iata: "DWC", label: "DWC", lat: 24.896, lon: 55.161, region: "me" },
   { iata: "DOH", label: "Doha", lat: 25.273, lon: 51.608, region: "me" },
   { iata: "BAH", label: "Bahrain", lat: 26.271, lon: 50.634, region: "me" },
   { iata: "KWI", label: "Kuwait", lat: 29.226, lon: 47.969, region: "me" },
   { iata: "MCT", label: "Muscat", lat: 23.593, lon: 58.284, region: "me" },
   { iata: "RUH", label: "Riyadh", lat: 24.958, lon: 46.699, region: "me" },
   { iata: "JED", label: "Jeddah", lat: 21.680, lon: 39.157, region: "me" },
+  // UK & Ireland
+  { iata: "LHR", label: "London", lat: 51.470, lon: -0.454, region: "uk" },
+  { iata: "MAN", label: "Manchester", lat: 53.354, lon: -2.275, region: "uk" },
+  { iata: "DUB", label: "Dublin", lat: 53.421, lon: -6.270, region: "uk" },
+  // Europe
+  { iata: "CDG", label: "Paris", lat: 49.010, lon: 2.548, region: "europe" },
+  { iata: "FRA", label: "Frankfurt", lat: 50.034, lon: 8.562, region: "europe" },
+  { iata: "AMS", label: "Amsterdam", lat: 52.309, lon: 4.764, region: "europe" },
+  { iata: "FCO", label: "Rome", lat: 41.804, lon: 12.251, region: "europe" },
+  { iata: "IST", label: "Istanbul", lat: 41.275, lon: 28.752, region: "europe" },
+  // Americas
+  { iata: "JFK", label: "New York", lat: 40.640, lon: -73.779, region: "americas" },
+  { iata: "LAX", label: "Los Angeles", lat: 33.943, lon: -118.408, region: "americas" },
+  { iata: "ORD", label: "Chicago", lat: 41.974, lon: -87.907, region: "americas" },
   // India
   { iata: "DEL", label: "Delhi", lat: 28.556, lon: 77.100, region: "india" },
   { iata: "BOM", label: "Mumbai", lat: 19.089, lon: 72.869, region: "india" },
@@ -40,6 +55,8 @@ export const HUBS: HubDef[] = [
   { iata: "HYD", label: "Hyderabad", lat: 17.231, lon: 78.430, region: "india" },
   { iata: "MAA", label: "Chennai", lat: 12.990, lon: 80.169, region: "india" },
   { iata: "COK", label: "Kochi", lat: 10.152, lon: 76.402, region: "india" },
+  // Asia-Pacific
+  { iata: "SIN", label: "Singapore", lat: 1.350, lon: 103.994, region: "asia_pac" },
 ];
 
 const HUB_SET = new Set(HUBS.map((h) => h.iata));

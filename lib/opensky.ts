@@ -4,7 +4,7 @@
  * Then classify aircraft by proximity to DXB / AUH.
  */
 
-export type AirportCode = "DXB" | "AUH";
+export type AirportCode = "DXB" | "AUH" | "DWC";
 
 export type FlightObservation = {
   airport: AirportCode;
@@ -32,6 +32,7 @@ export type FlightObservation = {
 const AIRPORT_COORDS: Record<AirportCode, { lat: number; lon: number }> = {
   DXB: { lat: 25.2528, lon: 55.3644 },
   AUH: { lat: 24.4330, lon: 54.6511 },
+  DWC: { lat: 24.8960, lon: 55.1614 },
 };
 
 function distKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -45,9 +46,13 @@ function distKm(lat1: number, lon1: number, lat2: number, lon2: number): number 
 }
 
 function nearestAirport(lat: number, lon: number): AirportCode {
-  const dDXB = distKm(lat, lon, AIRPORT_COORDS.DXB.lat, AIRPORT_COORDS.DXB.lon);
-  const dAUH = distKm(lat, lon, AIRPORT_COORDS.AUH.lat, AIRPORT_COORDS.AUH.lon);
-  return dDXB <= dAUH ? "DXB" : "AUH";
+  let best: AirportCode = "DXB";
+  let bestDist = Infinity;
+  for (const [code, coords] of Object.entries(AIRPORT_COORDS)) {
+    const d = distKm(lat, lon, coords.lat, coords.lon);
+    if (d < bestDist) { bestDist = d; best = code as AirportCode; }
+  }
+  return best;
 }
 
 function guessAirline(callsign: string): string | null {

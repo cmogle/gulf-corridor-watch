@@ -1,6 +1,8 @@
 /**
- * Stylized SVG geo-canvas for the Pulse Atlas.
- * Renders hub nodes and route ribbons on a schematic layout.
+ * Hub-and-spoke SVG geo-canvas for the Pulse Atlas.
+ * DXB/AUH at the center, with corridors radiating outward to
+ * Americas, UK, Europe (left), Gulf neighbours (inner ring),
+ * India (right), and Asia-Pacific (far right).
  */
 
 import { familyLabel } from "@/lib/aircraft-family";
@@ -14,31 +16,70 @@ type Props = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Stylized canvas positions (0–100 coordinate space)                 */
-/*  Loosely follows relative geography: ME left, India right           */
+/*  Hub-and-spoke positions (0-100 coordinate space)                   */
+/*  DXB/AUH at center, corridors radiate outward                       */
 /* ------------------------------------------------------------------ */
 
 const HUB_POS: Record<string, { cx: number; cy: number }> = {
-  // Middle East — left cluster
-  KWI: { cx: 14, cy: 22 },
-  BAH: { cx: 17, cy: 33 },
-  RUH: { cx: 10, cy: 42 },
-  DOH: { cx: 20, cy: 40 },
-  DXB: { cx: 30, cy: 38 },
-  AUH: { cx: 27, cy: 46 },
-  MCT: { cx: 36, cy: 52 },
-  JED: { cx: 6, cy: 54 },
-  // India — right cluster
-  DEL: { cx: 70, cy: 18 },
-  AMD: { cx: 62, cy: 34 },
-  BOM: { cx: 60, cy: 48 },
-  HYD: { cx: 72, cy: 50 },
-  GOI: { cx: 62, cy: 58 },
-  BLR: { cx: 72, cy: 64 },
-  MAA: { cx: 80, cy: 58 },
-  COK: { cx: 68, cy: 72 },
-  CCU: { cx: 84, cy: 26 },
+  // ── Americas (far left) ──
+  JFK: { cx: 4, cy: 30 },
+  ORD: { cx: 6, cy: 20 },
+  LAX: { cx: 4, cy: 44 },
+
+  // ── UK & Ireland ──
+  LHR: { cx: 16, cy: 26 },
+  MAN: { cx: 14, cy: 16 },
+  DUB: { cx: 12, cy: 22 },
+
+  // ── Europe ──
+  AMS: { cx: 20, cy: 18 },
+  FRA: { cx: 22, cy: 26 },
+  CDG: { cx: 18, cy: 34 },
+  FCO: { cx: 24, cy: 40 },
+  IST: { cx: 28, cy: 30 },
+
+  // ── Gulf Core (center) ──
+  KWI: { cx: 40, cy: 18 },
+  BAH: { cx: 42, cy: 30 },
+  RUH: { cx: 36, cy: 40 },
+  DOH: { cx: 44, cy: 38 },
+  DXB: { cx: 52, cy: 36 },
+  AUH: { cx: 49, cy: 44 },
+  DWC: { cx: 54, cy: 44 },
+  MCT: { cx: 60, cy: 48 },
+  JED: { cx: 34, cy: 54 },
+
+  // ── India (right cluster) ──
+  DEL: { cx: 74, cy: 16 },
+  AMD: { cx: 68, cy: 30 },
+  CCU: { cx: 84, cy: 22 },
+  BOM: { cx: 68, cy: 44 },
+  HYD: { cx: 76, cy: 46 },
+  GOI: { cx: 68, cy: 56 },
+  BLR: { cx: 76, cy: 60 },
+  MAA: { cx: 82, cy: 54 },
+  COK: { cx: 74, cy: 68 },
+
+  // ── Asia-Pacific (far right) ──
+  SIN: { cx: 94, cy: 60 },
 };
+
+/** Region divider positions (x% of viewbox) */
+const REGION_DIVIDERS = [
+  { x: 10, label: "" },   // Americas | UK/Europe
+  { x: 32, label: "" },   // UK/Europe | Gulf
+  { x: 64, label: "" },   // Gulf | India
+  { x: 88, label: "" },   // India | Asia-Pac
+];
+
+/** Region labels */
+const REGION_LABELS: { x: number; label: string }[] = [
+  { x: 5, label: "Americas" },
+  { x: 20, label: "UK & Europe" },
+  { x: 48, label: "Gulf" },
+  { x: 76, label: "India" },
+  { x: 94, label: "Asia-Pac" },
+];
 
 /** SVG viewBox dimensions */
 const VW = 1000;
@@ -52,18 +93,17 @@ function toSvg(cx: number, cy: number): { x: number; y: number } {
 function controlPoint(x1: number, y1: number, x2: number, y2: number): { cx: number; cy: number } {
   const mx = (x1 + x2) / 2;
   const my = (y1 + y2) / 2;
-  // Offset perpendicular to the line for a nice curve
   const dx = x2 - x1;
   const dy = y2 - y1;
   const dist = Math.sqrt(dx * dx + dy * dy);
-  const offset = Math.min(dist * 0.15, 60);
+  const offset = Math.min(dist * 0.12, 50);
   return { cx: mx - (dy / dist) * offset, cy: my + (dx / dist) * offset };
 }
 
 function nodeRadius(node: NetworkNode): number {
   const activity = node.now_in + node.now_out;
-  if (activity === 0) return 12;
-  return Math.min(12 + Math.sqrt(activity) * 4, 32);
+  if (activity === 0) return 10;
+  return Math.min(10 + Math.sqrt(activity) * 3.5, 28);
 }
 
 function nodeColor(node: NetworkNode): string {
@@ -79,7 +119,6 @@ function ribbonWidth(edge: NetworkEdge): number {
 }
 
 function ribbonOpacity(edge: NetworkEdge): number {
-  // Consistency: what fraction of trend bins have activity
   const activeBins = edge.trend_counts_5m.filter((c) => c > 0).length;
   const total = edge.trend_counts_5m.length || 1;
   const consistency = activeBins / total;
@@ -96,43 +135,48 @@ export function AtlasCanvas({ nodes, edges, hoveredEdge, onHoverEdge }: Props) {
   return (
     <div className="relative w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
       {/* Region labels */}
-      <div className="pointer-events-none absolute inset-0 flex justify-between px-6 pt-3">
-        <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)] opacity-50">
-          Middle East
-        </span>
-        <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)] opacity-50">
-          India
-        </span>
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-between px-2 pt-2">
+        {REGION_LABELS.map((r) => (
+          <span
+            key={r.label}
+            className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] opacity-40"
+            style={{ position: "absolute", left: `${r.x}%`, transform: "translateX(-50%)" }}
+          >
+            {r.label}
+          </span>
+        ))}
       </div>
 
       <svg
         viewBox={`0 0 ${VW} ${VH}`}
         className="h-auto w-full"
         style={{ minHeight: 280 }}
-        aria-label="Pulse Atlas: corridor network visualization"
+        aria-label="Pulse Atlas: hub-and-spoke corridor network"
         role="img"
       >
         <defs>
-          {/* Subtle gradient for the background */}
-          <radialGradient id="atlas-bg" cx="50%" cy="50%" r="60%">
-            <stop offset="0%" stopColor="var(--primary-blue)" stopOpacity="0.02" />
+          <radialGradient id="atlas-bg" cx="52%" cy="40%" r="35%">
+            <stop offset="0%" stopColor="var(--primary-blue)" stopOpacity="0.04" />
             <stop offset="100%" stopColor="transparent" />
           </radialGradient>
 
-          {/* Glow filter for active nodes */}
           <filter id="node-glow" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="6" />
           </filter>
         </defs>
 
-        {/* Background atmosphere */}
+        {/* Background atmosphere — centered on Gulf core */}
         <rect width={VW} height={VH} fill="url(#atlas-bg)" />
 
-        {/* Dividing region line */}
-        <line
-          x1={VW * 0.46} y1={20} x2={VW * 0.46} y2={VH - 20}
-          stroke="var(--text-secondary)" strokeWidth="0.5" strokeDasharray="4 8" opacity="0.15"
-        />
+        {/* Region divider lines */}
+        {REGION_DIVIDERS.map((d, i) => (
+          <line
+            key={i}
+            x1={(d.x / 100) * VW} y1={20}
+            x2={(d.x / 100) * VW} y2={VH - 20}
+            stroke="var(--text-secondary)" strokeWidth="0.5" strokeDasharray="4 8" opacity="0.12"
+          />
+        ))}
 
         {/* ── Edges (ribbons) ── */}
         <g className="atlas-edges">
@@ -255,13 +299,13 @@ export function AtlasCanvas({ nodes, edges, hoveredEdge, onHoverEdge }: Props) {
                 {/* Outer pulse ring for active hubs */}
                 {!isInactive && (
                   <circle
-                    cx={x} cy={y} r={r + 6}
+                    cx={x} cy={y} r={r + 5}
                     fill="none"
                     stroke={color}
                     strokeWidth={1}
                     opacity={0.25}
                     className="animate-atlas-node-pulse"
-                    style={{ "--node-r": `${r + 6}` } as React.CSSProperties}
+                    style={{ "--node-r": `${r + 5}` } as React.CSSProperties}
                   />
                 )}
 
@@ -275,12 +319,12 @@ export function AtlasCanvas({ nodes, edges, hoveredEdge, onHoverEdge }: Props) {
                 />
 
                 {/* Activity count */}
-                {!isInactive && (
+                {!isInactive && r > 14 && (
                   <text
                     x={x} y={y + 4}
                     textAnchor="middle"
                     className="fill-white"
-                    style={{ fontSize: r > 20 ? 12 : 10, fontFamily: "var(--font-mono)", fontWeight: 700 }}
+                    style={{ fontSize: r > 20 ? 11 : 9, fontFamily: "var(--font-mono)", fontWeight: 700 }}
                   >
                     {activity}
                   </text>
@@ -288,10 +332,10 @@ export function AtlasCanvas({ nodes, edges, hoveredEdge, onHoverEdge }: Props) {
 
                 {/* IATA label */}
                 <text
-                  x={x} y={y + r + 14}
+                  x={x} y={y + r + 13}
                   textAnchor="middle"
                   style={{
-                    fontSize: 11,
+                    fontSize: 10,
                     fontFamily: "var(--font-mono)",
                     fontWeight: 500,
                     fill: isInactive ? "var(--text-secondary)" : "var(--text-primary)",

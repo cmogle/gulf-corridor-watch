@@ -24,6 +24,7 @@ const AIRPORT_ALIASES: Record<string, string[]> = {
   // UAE
   dxb: ["DXB"], dubai: ["DXB"],
   auh: ["AUH"], "abu dhabi": ["AUH"],
+  dwc: ["DWC"], "al maktoum": ["DWC"], "dubai world central": ["DWC"],
   // India
   del: ["DEL"], delhi: ["DEL"], "new delhi": ["DEL"],
   bom: ["BOM"], mumbai: ["BOM"], bombay: ["BOM"],

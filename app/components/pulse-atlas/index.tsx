@@ -8,10 +8,14 @@ import { AtlasCanvas } from "./atlas-canvas";
 import { RouteLadder } from "./route-ladder";
 
 const FILTERS: { key: AtlasFilter; label: string }[] = [
-  { key: "all", label: "All" },
+  { key: "all", label: "All Corridors" },
+  { key: "longhaul_inbound", label: "Long-haul Inbound" },
   { key: "uae_outbound", label: "UAE Outbound" },
   { key: "uae_inbound", label: "UAE Inbound" },
-  { key: "india_linked", label: "India-linked" },
+  { key: "uk_linked", label: "UK" },
+  { key: "europe_linked", label: "Europe" },
+  { key: "americas_linked", label: "Americas" },
+  { key: "india_linked", label: "India" },
 ];
 
 export function AirspacePulseAtlas() {

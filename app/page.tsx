@@ -38,7 +38,7 @@ type Row = {
 };
 
 type FlightRow = {
-  airport: "DXB" | "AUH";
+  airport: "DXB" | "AUH" | "DWC";
   origin_iata: string | null;
   destination_iata: string | null;
   status: string;
@@ -46,11 +46,13 @@ type FlightRow = {
   fetched_at: string;
 };
 
+type AirportCode = "DXB" | "AUH" | "DWC";
+
 type FlightPulseData = {
   total: number;
   delayed: number;
   cancelled: number;
-  byAirport: Record<"DXB" | "AUH", { total: number; delayed: number; cancelled: number; latestFetch: string | null }>;
+  byAirport: Record<AirportCode, { total: number; delayed: number; cancelled: number; latestFetch: string | null }>;
   topRoutes: Array<{ route: string; count: number }>;
   latestFetch: string | null;
 };
@@ -100,6 +102,7 @@ async function loadFlightPulse(): Promise<FlightPulseData> {
     byAirport: {
       DXB: { total: 0, delayed: 0, cancelled: 0, latestFetch: null },
       AUH: { total: 0, delayed: 0, cancelled: 0, latestFetch: null },
+      DWC: { total: 0, delayed: 0, cancelled: 0, latestFetch: null },
     },
     topRoutes: [],
     latestFetch: null,
@@ -129,7 +132,8 @@ async function loadFlightPulse(): Promise<FlightPulseData> {
       if (/cancel/.test(row.status)) cancelled += 1;
       if (new Date(row.fetched_at).getTime() > new Date(latestFetch).getTime()) latestFetch = row.fetched_at;
 
-      const airportBucket = empty.byAirport[row.airport];
+      const airportBucket = empty.byAirport[row.airport as AirportCode];
+      if (!airportBucket) continue;
       airportBucket.total += 1;
       if (row.is_delayed) airportBucket.delayed += 1;
       if (/cancel/.test(row.status)) airportBucket.cancelled += 1;

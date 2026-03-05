@@ -15,13 +15,22 @@ function kvAvailable(): boolean {
   return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
 }
 
+/** Diagnostic helper — returns KV availability info (no secrets). */
+export function kvStatus(): { available: boolean; url_set: boolean; token_set: boolean } {
+  return {
+    available: kvAvailable(),
+    url_set: Boolean(process.env.KV_REST_API_URL),
+    token_set: Boolean(process.env.KV_REST_API_TOKEN),
+  };
+}
+
 /** Record a heartbeat — sets the current timestamp in KV. */
 export async function recordHeartbeat(): Promise<void> {
   if (!kvAvailable()) return;
   try {
     await kv.set(SESSION_KEY, Date.now(), { ex: SESSION_TTL_SEC });
-  } catch {
-    // KV write failure is non-critical
+  } catch (err) {
+    console.error("KV heartbeat write failed:", err);
   }
 }
 
@@ -50,7 +59,8 @@ export async function getInactivityMinutes(): Promise<number | null> {
     const ts = await kv.get<number>(SESSION_KEY);
     if (ts === null || ts === undefined) return null;
     return Math.round((Date.now() - ts) / 60_000);
-  } catch {
+  } catch (err) {
+    console.error("KV inactivity read failed:", err);
     return null;
   }
 }

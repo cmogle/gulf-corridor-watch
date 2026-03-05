@@ -1,9 +1,10 @@
 "use client";
 
 import type { FlightRecord } from "@/lib/flight-detail";
-import { familyLabel, classifyAircraftType } from "@/lib/aircraft-family";
+import { familyLabel } from "@/lib/aircraft-family";
 import type { DrillDownFilter } from "./drill-down-filter";
 import { filterLabel } from "./drill-down-filter";
+import { friendlyStatus, statusBadgeStyle } from "./status-labels";
 
 type Props = {
   flights: FlightRecord[];
@@ -14,22 +15,11 @@ type Props = {
 
 const MAX_DISPLAY = 50;
 
-function statusBadge(status: string): { bg: string; text: string } {
-  switch (status) {
-    case "cruise":    return { bg: "bg-emerald-50", text: "text-emerald-700" };
-    case "approach":  return { bg: "bg-blue-50",    text: "text-blue-700" };
-    case "departure": return { bg: "bg-purple-50",  text: "text-purple-700" };
-    case "on_ground": return { bg: "bg-gray-100",   text: "text-gray-600" };
-    default:          return { bg: "bg-gray-100",    text: "text-gray-600" };
-  }
-}
-
-function relativeTime(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const minutes = Math.round(diffMs / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  return `${Math.round(minutes / 60)}h ago`;
+/** Format ISO time as HH:MM in UAE timezone (UTC+4). */
+function uaeTime(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(new Date(iso).getTime() + 4 * 60 * 60_000);
+  return `${d.getUTCHours().toString().padStart(2, "0")}:${d.getUTCMinutes().toString().padStart(2, "0")}`;
 }
 
 export function FlightList({ flights, filter, onClearFilter, contextType }: Props) {
@@ -75,45 +65,54 @@ export function FlightList({ flights, filter, onClearFilter, contextType }: Prop
                   <th className="py-2 pr-2 font-medium">Route</th>
                 )}
                 <th className="hidden py-2 pr-2 font-medium sm:table-cell">Airline</th>
-                <th className="py-2 pr-2 font-medium">Type</th>
                 <th className="py-2 pr-2 font-medium">Status</th>
+                <th className="py-2 pr-2 font-medium">STD</th>
+                <th className="hidden py-2 pr-2 font-medium sm:table-cell">ETA</th>
                 <th className="py-2 pr-2 font-medium">Delay</th>
-                <th className="hidden py-2 font-medium sm:table-cell">Seen</th>
+                <th className="hidden py-2 pr-2 font-medium sm:table-cell">Type</th>
+                <th className="hidden py-2 font-medium md:table-cell">Gate</th>
               </tr>
             </thead>
             <tbody>
               {displayed.map((f, i) => {
-                const badge = statusBadge(f.status);
+                const displayStatus = friendlyStatus(f.status, f.schedule_status);
+                const badge = statusBadgeStyle(displayStatus);
                 return (
                   <tr key={`${f.flight_number}-${i}`} className="border-b border-gray-100">
                     <td className="py-2 pr-2 font-mono font-medium">{f.flight_number}</td>
                     {contextType === "airport" && (
                       <td className="py-2 pr-2 font-mono text-[var(--text-secondary)]">
-                        {f.origin_iata ?? "?"}<span className="mx-0.5">→</span>{f.destination_iata ?? "?"}
+                        {f.origin_iata ?? "?"}<span className="mx-0.5">&rarr;</span>{f.destination_iata ?? "?"}
                       </td>
                     )}
                     <td className="hidden truncate py-2 pr-2 sm:table-cell" style={{ maxWidth: 100 }}>
-                      {f.airline ?? "—"}
-                    </td>
-                    <td className="py-2 pr-2">
-                      <span className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[10px] font-medium text-[var(--text-secondary)]">
-                        {familyLabel(f.aircraft_family)}
-                      </span>
+                      {f.airline ?? "\u2014"}
                     </td>
                     <td className="py-2 pr-2">
                       <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${badge.bg} ${badge.text}`}>
-                        {f.status}
+                        {displayStatus}
                       </span>
+                    </td>
+                    <td className="py-2 pr-2 font-mono text-[var(--text-secondary)]">
+                      {uaeTime(f.scheduled_time) ?? "\u2014"}
+                    </td>
+                    <td className="hidden py-2 pr-2 font-mono text-[var(--text-secondary)] sm:table-cell">
+                      {uaeTime(f.estimated_time) ?? "\u2014"}
                     </td>
                     <td className="py-2 pr-2">
                       {f.is_delayed ? (
                         <span className="font-mono text-[var(--amber)]">{f.delay_minutes ?? "?"}m</span>
                       ) : (
-                        <span className="text-[var(--text-secondary)]">—</span>
+                        <span className="text-[var(--text-secondary)]">\u2014</span>
                       )}
                     </td>
-                    <td className="hidden py-2 text-[var(--text-secondary)] sm:table-cell">
-                      {relativeTime(f.fetched_at)}
+                    <td className="hidden py-2 pr-2 sm:table-cell">
+                      <span className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[10px] font-medium text-[var(--text-secondary)]">
+                        {familyLabel(f.aircraft_family)}
+                      </span>
+                    </td>
+                    <td className="hidden py-2 font-mono text-[var(--text-secondary)] md:table-cell">
+                      {f.terminal && f.gate ? `T${f.terminal} ${f.gate}` : f.gate ?? f.terminal ? `T${f.terminal}` : "\u2014"}
                     </td>
                   </tr>
                 );

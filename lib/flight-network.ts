@@ -125,22 +125,20 @@ type RawRow = {
 /*  Deduplication                                                      */
 /* ------------------------------------------------------------------ */
 
-const BUCKET_MS = 5 * 60_000; // 5-minute buckets
+const BUCKET_MS = 5 * 60_000; // 5-minute buckets (used for trend sparklines)
 
 function observationKey(row: RawRow): string {
   if (row.flight_id) return row.flight_id;
-  return `${row.flight_number}|${row.origin_iata ?? ""}|${row.destination_iata ?? ""}`;
+  // Include UTC date so the same flight code on consecutive days stays distinct
+  const day = row.fetched_at.slice(0, 10);
+  return `${row.flight_number}|${row.origin_iata ?? ""}|${row.destination_iata ?? ""}|${day}`;
 }
 
-function bucketKey(row: RawRow): string {
-  const bucket = Math.floor(new Date(row.fetched_at).getTime() / BUCKET_MS);
-  return `${observationKey(row)}|${bucket}`;
-}
-
+/** Keep only the latest observation per unique flight identity. */
 function deduplicate(rows: RawRow[]): RawRow[] {
   const best = new Map<string, RawRow>();
   for (const row of rows) {
-    const key = bucketKey(row);
+    const key = observationKey(row);
     const existing = best.get(key);
     if (!existing || new Date(row.fetched_at).getTime() > new Date(existing.fetched_at).getTime()) {
       best.set(key, row);

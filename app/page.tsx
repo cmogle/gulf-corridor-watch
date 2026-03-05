@@ -33,6 +33,8 @@ type Row = {
 };
 
 type FlightRow = {
+  flight_number: string;
+  flight_id: string | null;
   airport: "DXB" | "AUH" | "DWC";
   origin_iata: string | null;
   destination_iata: string | null;
@@ -96,13 +98,26 @@ async function loadFlightPulse(): Promise<FlightPulseData> {
     const cutoff = new Date(Date.now() - 45 * 60_000).toISOString();
     const { data, error } = await supabase
       .from("flight_observations")
-      .select("airport,origin_iata,destination_iata,status,is_delayed,fetched_at")
+      .select("flight_number,flight_id,airport,origin_iata,destination_iata,status,is_delayed,fetched_at")
       .gte("fetched_at", cutoff)
       .order("fetched_at", { ascending: false })
       .limit(2000);
     if (error) throw error;
 
-    const rows = (data ?? []) as FlightRow[];
+    const rawRows = (data ?? []) as FlightRow[];
+    if (rawRows.length === 0) return empty;
+
+    // Deduplicate: keep only the latest observation per flight identity
+    const best = new Map<string, FlightRow>();
+    for (const row of rawRows) {
+      const day = row.fetched_at.slice(0, 10);
+      const key = row.flight_id ?? `${row.flight_number}|${row.origin_iata ?? ""}|${row.destination_iata ?? ""}|${day}`;
+      const existing = best.get(key);
+      if (!existing || new Date(row.fetched_at).getTime() > new Date(existing.fetched_at).getTime()) {
+        best.set(key, row);
+      }
+    }
+    const rows = Array.from(best.values());
     if (rows.length === 0) return empty;
 
     const routeCounts = new Map<string, number>();

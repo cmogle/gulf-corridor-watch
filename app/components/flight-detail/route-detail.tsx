@@ -9,6 +9,7 @@ import type { RouteDetailResult } from "@/lib/flight-detail";
 import { familyLabel, classifyAircraftType } from "@/lib/aircraft-family";
 import type { DrillDownFilter } from "./drill-down-filter";
 import { applyFilter } from "./drill-down-filter";
+import { friendlyStatus, statusBadgeStyle } from "./status-labels";
 
 type Props = { from: string; to: string };
 
@@ -20,14 +21,11 @@ function relativeTime(iso: string): string {
   return `${Math.round(minutes / 60)}h ago`;
 }
 
-function statusBadge(status: string): { bg: string; text: string } {
-  switch (status) {
-    case "cruise": return { bg: "bg-emerald-50", text: "text-emerald-700" };
-    case "approach": return { bg: "bg-blue-50", text: "text-blue-700" };
-    case "departure": return { bg: "bg-purple-50", text: "text-purple-700" };
-    case "on_ground": return { bg: "bg-gray-100", text: "text-gray-600" };
-    default: return { bg: "bg-gray-100", text: "text-gray-600" };
-  }
+/** Format ISO time as HH:MM in UAE timezone (UTC+4). */
+function uaeTime(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(new Date(iso).getTime() + 4 * 60 * 60_000);
+  return `${d.getUTCHours().toString().padStart(2, "0")}:${d.getUTCMinutes().toString().padStart(2, "0")}`;
 }
 
 function TrendArrow({ trend }: { trend: "up" | "flat" | "down" }) {
@@ -158,30 +156,35 @@ export function RouteDetail({ from, to }: Props) {
                   <th className="py-2 pr-2 font-medium">Flight</th>
                   <th className="py-2 pr-2 font-medium">Airline</th>
                   <th className="py-2 pr-2 font-medium">Status</th>
-                  <th className="py-2 pr-2 font-medium">Type</th>
+                  <th className="py-2 pr-2 font-medium">STD</th>
+                  <th className="py-2 pr-2 font-medium">ETA</th>
                   <th className="py-2 font-medium">Delay</th>
                 </tr>
               </thead>
               <tbody>
                 {data.active_flights.map((f, i) => {
-                  const badge = statusBadge(f.status);
+                  const displayStatus = friendlyStatus(f.status, f.schedule_status);
+                  const badge = statusBadgeStyle(displayStatus);
                   return (
                     <tr key={`${f.flight_number}-${i}`} className="border-b border-gray-100">
                       <td className="py-2 pr-2 font-mono font-medium">{f.flight_number}</td>
-                      <td className="py-2 pr-2 truncate max-w-[100px]">{f.airline ?? "—"}</td>
+                      <td className="py-2 pr-2 truncate max-w-[100px]">{f.airline ?? "\u2014"}</td>
                       <td className="py-2 pr-2">
                         <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${badge.bg} ${badge.text}`}>
-                          {f.status}
+                          {displayStatus}
                         </span>
                       </td>
-                      <td className="py-2 pr-2 font-mono">
-                        {f.aircraft_type ? familyLabel(classifyAircraftType(f.aircraft_type)) : "—"}
+                      <td className="py-2 pr-2 font-mono text-[var(--text-secondary)]">
+                        {uaeTime(f.scheduled_time) ?? "\u2014"}
+                      </td>
+                      <td className="py-2 pr-2 font-mono text-[var(--text-secondary)]">
+                        {uaeTime(f.estimated_time) ?? "\u2014"}
                       </td>
                       <td className="py-2">
                         {f.is_delayed ? (
                           <span className="text-[var(--amber)]">{f.delay_minutes ?? "?"}m</span>
                         ) : (
-                          <span className="text-[var(--text-secondary)]">—</span>
+                          <span className="text-[var(--text-secondary)]">{"\u2014"}</span>
                         )}
                       </td>
                     </tr>

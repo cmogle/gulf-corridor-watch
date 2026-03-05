@@ -53,9 +53,14 @@ export type ActiveFlight = {
   flight_number: string;
   airline: string | null;
   status: string;
+  schedule_status: string | null;
   aircraft_type: string | null;
   is_delayed: boolean;
   delay_minutes: number | null;
+  scheduled_time: string | null;
+  estimated_time: string | null;
+  gate: string | null;
+  terminal: string | null;
   fetched_at: string;
 };
 
@@ -65,11 +70,16 @@ export type FlightRecord = {
   origin_iata: string | null;
   destination_iata: string | null;
   status: string;
+  schedule_status: string | null;
   aircraft_type: string | null;
   aircraft_family: AircraftFamily;
   registration: string | null;
   is_delayed: boolean;
   delay_minutes: number | null;
+  scheduled_time: string | null;
+  estimated_time: string | null;
+  gate: string | null;
+  terminal: string | null;
   fetched_at: string;
   hour: number;  // UAE hour 0-23
 };
@@ -126,22 +136,60 @@ type BaselineRow = {
   avg_total: number;
 };
 
+type ScheduleRow = {
+  flight_number: string;
+  status: string;
+  scheduled_time: string;
+  estimated_time: string | null;
+  is_delayed: boolean;
+  delay_minutes: number | null;
+  gate: string | null;
+  terminal: string | null;
+};
+
+/** Build a lookup map from flight_number to latest schedule info. */
+function buildScheduleMap(schedules: ScheduleRow[]): Map<string, ScheduleRow> {
+  const map = new Map<string, ScheduleRow>();
+  for (const s of schedules) {
+    const existing = map.get(s.flight_number);
+    if (!existing || new Date(s.scheduled_time).getTime() > new Date(existing.scheduled_time).getTime()) {
+      map.set(s.flight_number, s);
+    }
+  }
+  return map;
+}
+
+/** Fetch schedule data for a set of flight numbers. */
+async function fetchSchedules(flightNumbers: string[]): Promise<Map<string, ScheduleRow>> {
+  if (flightNumbers.length === 0) return new Map();
+  const supabase = getSupabaseAdmin();
+  const cutoff = new Date(Date.now() - 24 * 60 * 60_000).toISOString(); // last 24h
+  const { data } = await supabase
+    .from("flight_schedules")
+    .select("flight_number,status,scheduled_time,estimated_time,is_delayed,delay_minutes,gate,terminal")
+    .in("flight_number", flightNumbers)
+    .gte("scheduled_time", cutoff)
+    .order("scheduled_time", { ascending: false })
+    .limit(2000);
+  return buildScheduleMap((data ?? []) as ScheduleRow[]);
+}
+
 /* ------------------------------------------------------------------ */
 /*  Deduplication (mirrors flight-network.ts)                          */
 /* ------------------------------------------------------------------ */
 
-const BUCKET_MS = 5 * 60_000;
-
 function observationKey(row: ObsRow): string {
   if (row.flight_id) return row.flight_id;
-  return `${row.flight_number}|${row.origin_iata ?? ""}|${row.destination_iata ?? ""}`;
+  // Include UTC date so the same flight code on consecutive days stays distinct
+  const day = row.fetched_at.slice(0, 10);
+  return `${row.flight_number}|${row.origin_iata ?? ""}|${row.destination_iata ?? ""}|${day}`;
 }
 
+/** Keep only the latest observation per unique flight identity. */
 function deduplicate(rows: ObsRow[]): ObsRow[] {
   const best = new Map<string, ObsRow>();
   for (const row of rows) {
-    const bucket = Math.floor(new Date(row.fetched_at).getTime() / BUCKET_MS);
-    const key = `${observationKey(row)}|${bucket}`;
+    const key = observationKey(row);
     const existing = best.get(key);
     if (!existing || new Date(row.fetched_at).getTime() > new Date(existing.fetched_at).getTime()) {
       best.set(key, row);
@@ -179,21 +227,30 @@ function hubLabel(iata: string): string {
 /*  Flight record builder                                              */
 /* ------------------------------------------------------------------ */
 
-function toFlightRecords(rows: ObsRow[]): FlightRecord[] {
+function toFlightRecords(rows: ObsRow[], scheduleMap?: Map<string, ScheduleRow>): FlightRecord[] {
   return rows
     .map((r) => {
       const typeCode = (r.raw_payload?.type as string) ?? null;
+      const sched = scheduleMap?.get(r.flight_number);
+      // Prefer schedule delay data over observation data (schedule has actual vs planned)
+      const isDelayed = sched?.is_delayed ?? r.is_delayed;
+      const delayMin = sched?.delay_minutes ?? r.delay_minutes;
       return {
         flight_number: r.flight_number,
         airline: r.airline,
         origin_iata: r.origin_iata,
         destination_iata: r.destination_iata,
         status: r.status,
+        schedule_status: sched?.status ?? null,
         aircraft_type: typeCode,
         aircraft_family: classifyAircraftType(typeCode),
         registration: (r.raw_payload?.reg as string) ?? null,
-        is_delayed: r.is_delayed,
-        delay_minutes: r.delay_minutes,
+        is_delayed: isDelayed,
+        delay_minutes: delayMin,
+        scheduled_time: sched?.scheduled_time ?? null,
+        estimated_time: sched?.estimated_time ?? (r.raw_payload?.eta as string) ?? null,
+        gate: sched?.gate ?? null,
+        terminal: sched?.terminal ?? null,
         fetched_at: r.fetched_at,
         hour: toUAEHour(r.fetched_at),
       };
@@ -405,7 +462,11 @@ export async function queryAirportDetail(
     .slice(0, 5)
     .map(([route, count]) => ({ route, count }));
 
-  const baselineRows = await fetchBaseline("airport", airport);
+  const flightNumbers = [...new Set(rows.map((r) => r.flight_number))];
+  const [baselineRows, scheduleMap] = await Promise.all([
+    fetchBaseline("airport", airport),
+    fetchSchedules(flightNumbers),
+  ]);
   const recovery = computeRecovery(hourlyBins, baselineRows);
 
   return {
@@ -418,7 +479,7 @@ export async function queryAirportDetail(
     airlines: aggregateAirlines(rows),
     equipment: aggregateEquipment(rows),
     delays: aggregateDelays(rows),
-    flights: toFlightRecords(rows),
+    flights: toFlightRecords(rows, scheduleMap),
     as_of: new Date().toISOString(),
   };
 }
@@ -460,6 +521,13 @@ export async function queryRouteDetail(
     (r) => r.destination_iata === from,
   );
 
+  // Fetch schedule data for enrichment
+  const flightNumbers = [...new Set(rows.map((r) => r.flight_number))];
+  const [baselineRows, scheduleMap] = await Promise.all([
+    fetchBaseline("route", routeBaselineKey(from, to)),
+    fetchSchedules(flightNumbers),
+  ]);
+
   // Active flights (last 30m, latest per flight identity)
   const recentRows = rows.filter((r) => r.fetched_at >= nowCutoff);
   const seenFlights = new Set<string>();
@@ -468,19 +536,23 @@ export async function queryRouteDetail(
     const flightKey = r.flight_id ?? r.flight_number;
     if (seenFlights.has(flightKey)) continue;
     seenFlights.add(flightKey);
+    const sched = scheduleMap.get(r.flight_number);
     activeFlights.push({
       flight_number: r.flight_number,
       airline: r.airline,
       status: r.status,
+      schedule_status: sched?.status ?? null,
       aircraft_type: (r.raw_payload?.type as string) ?? null,
-      is_delayed: r.is_delayed,
-      delay_minutes: r.delay_minutes,
+      is_delayed: sched?.is_delayed ?? r.is_delayed,
+      delay_minutes: sched?.delay_minutes ?? r.delay_minutes,
+      scheduled_time: sched?.scheduled_time ?? null,
+      estimated_time: sched?.estimated_time ?? (r.raw_payload?.eta as string) ?? null,
+      gate: sched?.gate ?? null,
+      terminal: sched?.terminal ?? null,
       fetched_at: r.fetched_at,
     });
   }
 
-  const baselineKey = routeBaselineKey(from, to);
-  const baselineRows = await fetchBaseline("route", baselineKey);
   const recovery = computeRecovery(hourlyBins, baselineRows);
 
   return {
@@ -493,7 +565,7 @@ export async function queryRouteDetail(
     airlines: aggregateAirlines(rows),
     equipment: aggregateEquipment(rows),
     delays: aggregateDelays(rows),
-    flights: toFlightRecords(rows),
+    flights: toFlightRecords(rows, scheduleMap),
     as_of: new Date().toISOString(),
   };
 }

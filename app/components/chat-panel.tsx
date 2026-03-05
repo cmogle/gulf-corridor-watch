@@ -108,15 +108,25 @@ export function ChatPanel({ suggestedPrompts = [], variant = "hero", initialProm
         headers["Authorization"] = `Bearer ${session.access_token}`;
       }
 
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          question,
-          session_id: sessionId,
-          stream: true,
-        }),
-      });
+      // Client-side timeout: abort if no response within 55 seconds
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 55_000);
+
+      let res: Response;
+      try {
+        res = await fetch("/api/chat", {
+          method: "POST",
+          headers,
+          signal: controller.signal,
+          body: JSON.stringify({
+            question,
+            session_id: sessionId,
+            stream: true,
+          }),
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       // Handle rate limit
       if (res.status === 429) {
@@ -160,6 +170,20 @@ export function ChatPanel({ suggestedPrompts = [], variant = "hero", initialProm
               if (line.startsWith("data: ")) {
                 try {
                   const payload = JSON.parse(line.slice(6));
+                  if (payload.error) {
+                    // Server-side error during streaming
+                    const errorText = accumulated
+                      ? accumulated + "\n\n*Connection lost. Response may be incomplete.*"
+                      : "Request timed out. Please try again.";
+                    setMessages((prev) =>
+                      prev.map((m) =>
+                        m.id === assistantId ? { ...m, content: errorText } : m,
+                      ),
+                    );
+                    setLoading(false);
+                    inputRef.current?.focus();
+                    return;
+                  }
                   if (payload.text) {
                     accumulated += payload.text;
                     setMessages((prev) =>
@@ -198,11 +222,14 @@ export function ChatPanel({ suggestedPrompts = [], variant = "hero", initialProm
           );
         }
       }
-    } catch {
+    } catch (err) {
+      const isTimeout = err instanceof DOMException && err.name === "AbortError";
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
-            ? { ...m, content: "Connection error. Please try again." }
+            ? { ...m, content: isTimeout
+                ? "Request timed out. The server may be busy — please try again."
+                : "Connection error. Please try again." }
             : m,
         ),
       );

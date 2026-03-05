@@ -95,6 +95,7 @@ You are also a flight operations specialist. For this query, you have flight-spe
       const llmResult = await generateText({
         model: CHAT_MODEL,
         temperature: 0.1,
+        timeoutMs: 45_000,
         system: flightSystemPrompt,
         userMessage: `${situationContext}
 
@@ -239,6 +240,7 @@ Question: ${question}`;
       model: CHAT_MODEL,
       temperature: 0.1,
       maxTokens: 2048,
+      timeoutMs: 45_000,
       system: CHAT_SYSTEM_PROMPT,
       userMessage: messages.map((m) => `${m.role}: ${m.content}`).join("\n\n"),
     });

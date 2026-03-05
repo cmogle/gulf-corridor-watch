@@ -97,41 +97,56 @@ export async function storeChatMessage(
  */
 export async function buildSituationContext(): Promise<string> {
   const parts: string[] = [];
+  const supabase = getSupabaseAdmin();
+  const gating = getContextGatingConfig();
 
-  // 1. Current intelligence brief
-  try {
-    const brief = await loadCurrentStateBrief({ allowTransient: true });
-    if (brief) {
-      parts.push("=== CURRENT INTELLIGENCE BRIEF ===");
-      parts.push(`Executive Summary: ${brief.paragraph}`);
-      parts.push(`Confidence: ${brief.confidence} | Freshness: ${brief.freshness_state}`);
-      const flightParts = [`${brief.flight.total} tracked`];
-      if (brief.flight.delayed > 0) flightParts.push(`${brief.flight.delayed} delayed`);
-      if (brief.flight.cancelled > 0) flightParts.push(`${brief.flight.cancelled} cancelled`);
-      parts.push(`Flights: ${flightParts.join(", ")}`);
-      if (brief.sections) {
-        if (brief.sections.security) parts.push(`Security: ${brief.sections.security}`);
-        if (brief.sections.flights) parts.push(`Airspace & Flights: ${brief.sections.flights}`);
-        if (brief.sections.guidance) parts.push(`Guidance: ${brief.sections.guidance}`);
-      }
-      parts.push(`Last updated: ${brief.refreshed_at}`);
+  // Run all context queries in parallel
+  const [briefResult, snapshotResult, socialResult, scheduleResult] = await Promise.allSettled([
+    // 1. Current intelligence brief
+    loadCurrentStateBrief({ allowTransient: true }),
+
+    // 2. Source snapshots
+    supabase
+      .from("latest_source_snapshots")
+      .select("source_id,source_name,source_url,fetched_at,published_at,title,summary,status_level,reliability,freshness_target_minutes,priority")
+      .limit(80),
+
+    // 3. Social signals
+    supabase
+      .from("social_signals")
+      .select("linked_source_id,handle,posted_at,url,text_en,text_original,translation_status,language_original")
+      .eq("provider", "x")
+      .order("posted_at", { ascending: false })
+      .limit(30),
+
+    // 4. Airport schedule stats
+    supabase
+      .from("flight_schedule_stats")
+      .select("*"),
+  ]);
+
+  // Process brief
+  if (briefResult.status === "fulfilled" && briefResult.value) {
+    const brief = briefResult.value;
+    parts.push("=== CURRENT INTELLIGENCE BRIEF ===");
+    parts.push(`Executive Summary: ${brief.paragraph}`);
+    parts.push(`Confidence: ${brief.confidence} | Freshness: ${brief.freshness_state}`);
+    const flightParts = [`${brief.flight.total} tracked`];
+    if (brief.flight.delayed > 0) flightParts.push(`${brief.flight.delayed} delayed`);
+    if (brief.flight.cancelled > 0) flightParts.push(`${brief.flight.cancelled} cancelled`);
+    parts.push(`Flights: ${flightParts.join(", ")}`);
+    if (brief.sections) {
+      if (brief.sections.security) parts.push(`Security: ${brief.sections.security}`);
+      if (brief.sections.flights) parts.push(`Airspace & Flights: ${brief.sections.flights}`);
+      if (brief.sections.guidance) parts.push(`Guidance: ${brief.sections.guidance}`);
     }
-  } catch {
-    // Brief unavailable — continue without
+    parts.push(`Last updated: ${brief.refreshed_at}`);
   }
 
-  // 2. Source snapshots
-  try {
-    const supabase = getSupabaseAdmin();
-    const gating = getContextGatingConfig();
-    const snapshotSelect =
-      "source_id,source_name,source_url,fetched_at,published_at,title,summary,status_level,reliability,freshness_target_minutes,priority";
-    const { data } = await supabase
-      .from("latest_source_snapshots")
-      .select(snapshotSelect)
-      .limit(80);
-
-    if (data && data.length > 0) {
+  // Process snapshots
+  if (snapshotResult.status === "fulfilled" && snapshotResult.value.data) {
+    const data = snapshotResult.value.data;
+    if (data.length > 0) {
       const gated = gateSnapshotContext(
         data.map((row: Record<string, unknown>) => ({
           source_id: String(row.source_id ?? ""),
@@ -164,22 +179,12 @@ export async function buildSituationContext(): Promise<string> {
         }
       }
     }
-  } catch {
-    // Source data unavailable — continue without
   }
 
-  // 3. Social signals
-  try {
-    const supabase = getSupabaseAdmin();
-    const gating = getContextGatingConfig();
-    const { data: socialData } = await supabase
-      .from("social_signals")
-      .select("linked_source_id,handle,posted_at,url,text_en,text_original,translation_status,language_original")
-      .eq("provider", "x")
-      .order("posted_at", { ascending: false })
-      .limit(30);
-
-    if (socialData && socialData.length > 0) {
+  // Process social signals
+  if (socialResult.status === "fulfilled" && socialResult.value.data) {
+    const socialData = socialResult.value.data;
+    if (socialData.length > 0) {
       const typedSocial: SocialContextRow[] = socialData.map((row: Record<string, unknown>) => ({
         linked_source_id: String(row.linked_source_id ?? ""),
         handle: String(row.handle ?? ""),
@@ -203,18 +208,12 @@ export async function buildSituationContext(): Promise<string> {
         }
       }
     }
-  } catch {
-    // Social data unavailable — continue without
   }
 
-  // 4. Airport schedule stats (departure boards)
-  try {
-    const supabase = getSupabaseAdmin();
-    const { data: scheduleStats } = await supabase
-      .from("flight_schedule_stats")
-      .select("*");
-
-    if (scheduleStats && scheduleStats.length > 0) {
+  // Process schedule stats
+  if (scheduleResult.status === "fulfilled" && scheduleResult.value.data) {
+    const scheduleStats = scheduleResult.value.data;
+    if (scheduleStats.length > 0) {
       parts.push("\n=== AIRPORT DEPARTURE BOARD STATS ===");
       for (const row of scheduleStats as Array<Record<string, unknown>>) {
         const airport = row.airport;
@@ -230,8 +229,6 @@ export async function buildSituationContext(): Promise<string> {
         parts.push(`[${airport} ${boardType}s] ${statParts.join(", ")}`);
       }
     }
-  } catch {
-    // Schedule stats unavailable — continue without
   }
 
   return parts.join("\n");

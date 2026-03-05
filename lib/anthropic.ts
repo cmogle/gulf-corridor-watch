@@ -102,13 +102,18 @@ export function streamText(opts: StreamTextOptions): {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        const anthropicStream = client.messages.stream({
-          model,
-          max_tokens: maxTokens,
-          temperature: opts.temperature ?? 0.1,
-          system: opts.system,
-          messages: opts.messages,
-        });
+        const anthropicStream = client.messages.stream(
+          {
+            model,
+            max_tokens: maxTokens,
+            temperature: opts.temperature ?? 0.1,
+            system: opts.system,
+            messages: opts.messages,
+          },
+          {
+            timeout: opts.timeoutMs ?? 45_000,
+          },
+        );
 
         for await (const event of anthropicStream) {
           if (event.type === "content_block_delta" && event.delta.type === "text_delta") {

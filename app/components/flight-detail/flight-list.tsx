@@ -100,10 +100,10 @@ export function FlightList({ flights, filter, onClearFilter, contextType }: Prop
                       {uaeTime(f.estimated_time) ?? "\u2014"}
                     </td>
                     <td className="py-2 pr-2">
-                      {f.is_delayed ? (
-                        <span className="font-mono text-[var(--amber)]">{f.delay_minutes ?? "?"}m</span>
+                      {f.delay_minutes != null && f.delay_minutes > 0 ? (
+                        <span className={`font-mono ${f.is_delayed ? "text-[var(--amber)]" : "text-[var(--text-secondary)]"}`}>{f.delay_minutes}m</span>
                       ) : (
-                        <span className="text-[var(--text-secondary)]">\u2014</span>
+                        <span className="text-[var(--text-secondary)]">{"\u2014"}</span>
                       )}
                     </td>
                     <td className="hidden py-2 pr-2 sm:table-cell">

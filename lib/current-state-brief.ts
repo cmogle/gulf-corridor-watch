@@ -709,6 +709,8 @@ export function isNarrativePolicyCompliant(paragraph: string, opts: { allowXMent
     /\bdisruption-related language\b/i,
     /\badvisory\/disrupted language\b/i,
     /\b\d+\s+(official|monitored)\s+(sources|feeds)\b/i,
+    /\b0 delayed\b/,
+    /\b0 cancelled\b/,
   ];
   if (bannedPatterns.some((pattern) => pattern.test(paragraph))) return false;
   if (!opts.allowXMention && (/\bX posts?\b/i.test(paragraph) || /@\w+/.test(paragraph))) return false;

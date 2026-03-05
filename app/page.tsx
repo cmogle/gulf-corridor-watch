@@ -4,21 +4,12 @@ import { isUsableSnapshot } from "@/lib/source-quality";
 import { loadTrustedFeed, loadTrustedSourceHealth } from "@/lib/trusted-feed-repo";
 import { loadUnifiedFeed } from "@/lib/unified-updates";
 import { loadCurrentStateBrief } from "@/lib/current-state-brief";
-import { StatusHero } from "@/app/components/status-hero";
-import { SituationBriefing } from "@/app/components/situation-briefing";
-import { FlightDetailProvider } from "@/app/components/flight-detail/context";
-import { FlightPulseWithDetail } from "@/app/components/flight-detail/flight-pulse-wrapper";
-import { UpdatesFeed } from "@/app/components/updates-feed";
 import { TrustedUpdatesFeedV2 } from "@/app/components/trusted-updates-feed-v2";
 import { SourceHealthV2 } from "@/app/components/source-health-v2";
-import { MyTrackingPanel } from "@/app/components/my-tracking-panel";
-import { ResourcesPanel } from "@/app/components/resources-panel";
-import { AirspacePulseAtlas } from "@/app/components/pulse-atlas";
-import { SourceHealth } from "@/app/components/source-health";
-import { ExpertAnalysisPanel } from "@/app/components/expert-analysis-panel";
-import { CrisisPanel } from "@/app/components/crisis-timeline";
+import { ChatFirstLayout } from "@/app/components/chat-first-layout";
 import { getActiveEventsWithStats } from "@/lib/crisis-stats";
 import { getCrisisTimeline } from "@/lib/crisis-timeline";
+import type { AirportCode, FlightPulseData } from "@/app/components/layout-types";
 
 export const dynamic = "force-dynamic";
 
@@ -48,17 +39,6 @@ type FlightRow = {
   status: string;
   is_delayed: boolean;
   fetched_at: string;
-};
-
-type AirportCode = "DXB" | "AUH" | "DWC";
-
-type FlightPulseData = {
-  total: number;
-  delayed: number;
-  cancelled: number;
-  byAirport: Record<AirportCode, { total: number; delayed: number; cancelled: number; latestFetch: string | null }>;
-  topRoutes: Array<{ route: string; count: number }>;
-  latestFetch: string | null;
 };
 
 function buildFlightPromptSuggestions(pulse: FlightPulseData): string[] {
@@ -200,7 +180,7 @@ export default async function Home() {
   const suggestedFlightPrompts = buildFlightPromptSuggestions(pulse);
   const initialUpdates = await loadUnifiedFeed(80).catch(() => []);
 
-  // Load crisis trend for StatusHero indicator
+  // Load crisis trend for status bar indicator
   let crisisTrend: "improving" | "worsening" | "stable" | null = null;
   try {
     const events = await getActiveEventsWithStats();
@@ -223,57 +203,27 @@ export default async function Home() {
         : "normal";
 
   return (
-    <>
-      <StatusHero
-        posture={posture}
-        briefingSummary={currentBrief?.paragraph ?? "Checking sources..."}
-        flightTotal={pulse.total}
-        flightDelayed={pulse.delayed}
-        flightCancelled={pulse.cancelled}
-        updatedAt={pulse.latestFetch}
-        sourceCount={usableRows.length}
-        suggestedPrompts={suggestedFlightPrompts}
-        trend={crisisTrend}
-      />
-
-      <CrisisPanel />
-
-      {currentBrief && (
-        <SituationBriefing
-          paragraph={currentBrief.paragraph}
-          sections={currentBrief.sections}
-          refreshedAt={currentBrief.refreshed_at}
-          confidence={currentBrief.confidence}
-          sourceCount={currentBrief.coverage.sources_included.length}
-        />
-      )}
-
-      <FlightDetailProvider>
-        <AirspacePulseAtlas />
-
-        <FlightPulseWithDetail byAirport={pulse.byAirport} topRoutes={pulse.topRoutes} />
-      </FlightDetailProvider>
-
-      <UpdatesFeed initialItems={initialUpdates} />
-
-      <ExpertAnalysisPanel />
-
-      <div className="mx-auto max-w-4xl px-4 py-4 md:px-0">
-        <MyTrackingPanel />
-      </div>
-
-      <ResourcesPanel />
-
-      <SourceHealth
-        totalSources={rows.length}
-        healthySources={usableRows.length}
-        suppressedSources={suppressedRows.map((row) => ({
-          source_id: row.source_id,
-          source_name: row.source_name,
-          source_url: row.source_url,
-          reason: suppressionReason(row),
-        }))}
-      />
-    </>
+    <ChatFirstLayout
+      posture={posture}
+      flightTotal={pulse.total}
+      flightDelayed={pulse.delayed}
+      flightCancelled={pulse.cancelled}
+      updatedAt={pulse.latestFetch}
+      trend={crisisTrend}
+      sourceCount={usableRows.length}
+      briefingSummary={currentBrief?.paragraph ?? "Checking sources..."}
+      suggestedPrompts={suggestedFlightPrompts}
+      currentBrief={currentBrief}
+      pulse={pulse}
+      initialUpdates={initialUpdates}
+      totalSources={rows.length}
+      healthySources={usableRows.length}
+      suppressedSources={suppressedRows.map((row) => ({
+        source_id: row.source_id,
+        source_name: row.source_name,
+        source_url: row.source_url,
+        reason: suppressionReason(row),
+      }))}
+    />
   );
 }

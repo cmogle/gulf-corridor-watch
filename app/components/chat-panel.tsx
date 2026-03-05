@@ -6,7 +6,11 @@ import { ChatMessage, type ChatMessageData } from "./chat-message";
 
 type ChatPanelProps = {
   suggestedPrompts?: string[];
-  variant?: "hero" | "standalone";
+  variant?: "hero" | "standalone" | "fullscreen";
+  /** Auto-submit this prompt on mount (used when transitioning from ChatHome) */
+  initialPrompt?: string;
+  /** Called when the first user message is sent */
+  onFirstMessage?: () => void;
 };
 
 const DEFAULT_PROMPTS = [
@@ -21,7 +25,7 @@ function nextId() {
   return `msg-${++messageCounter}-${Date.now()}`;
 }
 
-export function ChatPanel({ suggestedPrompts = [], variant = "hero" }: ChatPanelProps) {
+export function ChatPanel({ suggestedPrompts = [], variant = "hero", initialPrompt, onFirstMessage }: ChatPanelProps) {
   const { session, isAuthenticated } = useAuth();
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [input, setInput] = useState("");
@@ -33,6 +37,7 @@ export function ChatPanel({ suggestedPrompts = [], variant = "hero" }: ChatPanel
   const inputRef = useRef<HTMLInputElement>(null);
 
   const isOnDark = variant === "hero";
+  const isFullscreen = variant === "fullscreen";
 
   const chips = suggestedPrompts.length > 0
     ? [...new Set([...suggestedPrompts, ...DEFAULT_PROMPTS])].slice(0, 6)
@@ -48,6 +53,15 @@ export function ChatPanel({ suggestedPrompts = [], variant = "hero" }: ChatPanel
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
+  // Auto-submit initial prompt on mount
+  useEffect(() => {
+    if (initialPrompt) {
+      const timer = setTimeout(() => void submit(initialPrompt), 50);
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPrompt]);
+
   function newChat() {
     setMessages([]);
     setSessionId(null);
@@ -58,6 +72,11 @@ export function ChatPanel({ suggestedPrompts = [], variant = "hero" }: ChatPanel
   async function submit(overrideQuestion?: string) {
     const question = (overrideQuestion ?? input).trim();
     if (!question || loading) return;
+
+    // Notify parent on first message
+    if (messages.length === 0 && onFirstMessage) {
+      onFirstMessage();
+    }
 
     setLoading(true);
     setInput("");
@@ -193,6 +212,92 @@ export function ChatPanel({ suggestedPrompts = [], variant = "hero" }: ChatPanel
 
   const hasMessages = messages.length > 0;
 
+  // Fullscreen layout: flex column filling parent
+  if (isFullscreen) {
+    return (
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {/* Scrollable messages area */}
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto px-4 py-6"
+        >
+          <div className="mx-auto w-full max-w-3xl space-y-3">
+            {messages.map((msg) => (
+              <ChatMessage
+                key={msg.id}
+                message={msg}
+                isStreaming={loading && msg.role === "assistant" && msg === messages[messages.length - 1]}
+              />
+            ))}
+
+            {limitReached && !isAuthenticated && (
+              <div className="mt-2 flex justify-center">
+                <a
+                  href="/auth"
+                  className="rounded-lg bg-[var(--primary-blue)] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+                >
+                  Sign up for unlimited chat
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Input area — pinned to bottom */}
+        <div className="border-t border-gray-100 bg-[var(--surface-light)] px-4 py-3">
+          <div className="relative mx-auto w-full max-w-3xl">
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void submit();
+                }
+              }}
+              placeholder={
+                limitReached && !isAuthenticated
+                  ? "Sign up to continue chatting..."
+                  : "Ask anything — flights, routes, safety, advisories..."
+              }
+              disabled={limitReached && !isAuthenticated}
+              className="w-full rounded-xl border-0 bg-white px-4 py-3.5 pr-24 text-[15px] text-[var(--text-primary)] shadow-lg outline-none ring-2 ring-transparent placeholder:text-[var(--text-secondary)] focus:ring-[var(--primary-blue)] disabled:opacity-50"
+              aria-label="Chat message input"
+            />
+            <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1.5">
+              {hasMessages && (
+                <button
+                  onClick={newChat}
+                  className="rounded-lg px-2 py-2 text-xs text-[var(--text-secondary)] hover:bg-gray-100"
+                  title="New chat"
+                >
+                  New
+                </button>
+              )}
+              <button
+                onClick={() => void submit()}
+                disabled={loading || !input.trim() || (limitReached && !isAuthenticated)}
+                className="rounded-lg bg-[var(--surface-dark)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {loading ? "..." : "Ask"}
+              </button>
+            </div>
+          </div>
+
+          {/* Remaining messages info */}
+          {remaining !== null && remaining > 0 && !isAuthenticated && hasMessages && (
+            <p className="mx-auto mt-2 max-w-3xl text-xs text-[var(--text-secondary)]">
+              {remaining} free message{remaining !== 1 ? "s" : ""} remaining &middot; <a href="/auth" className="underline">Sign up</a> for unlimited
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Original hero/standalone layout
   return (
     <div className="w-full space-y-3">
       {/* Message history */}
@@ -289,7 +394,7 @@ export function ChatPanel({ suggestedPrompts = [], variant = "hero" }: ChatPanel
       {/* Footer info */}
       {remaining !== null && remaining > 0 && !isAuthenticated && hasMessages && (
         <p className={`text-xs ${isOnDark ? "text-[var(--text-on-dark-muted)]" : "text-[var(--text-secondary)]"}`}>
-          {remaining} free message{remaining !== 1 ? "s" : ""} remaining · <a href="/auth" className="underline">Sign up</a> for unlimited
+          {remaining} free message{remaining !== 1 ? "s" : ""} remaining &middot; <a href="/auth" className="underline">Sign up</a> for unlimited
         </p>
       )}
     </div>

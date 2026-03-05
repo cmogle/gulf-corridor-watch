@@ -15,6 +15,8 @@
     --text-secondary: #6B7280;
     --text-on-dark: #F9FAFB;
     --text-on-dark-muted: rgba(249, 250, 251, 0.6);
+    --border-light: #E5E7EB;
+    --surface-hover: #F9FAFB;
   }
 
   body {

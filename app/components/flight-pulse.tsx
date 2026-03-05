@@ -58,18 +58,18 @@ export function FlightPulse({ byAirport, topRoutes, onClickAirport }: Props) {
                   <span className="text-[var(--text-secondary)]">Tracked</span>{" "}
                   <span className="font-medium">{airport.total}</span>
                 </p>
-                <p>
-                  <span className="text-[var(--text-secondary)]">Delayed</span>{" "}
-                  <span className={`font-medium ${airport.delayed > 0 ? "text-[var(--amber)]" : ""}`}>
-                    {airport.delayed}
-                  </span>
-                </p>
-                <p>
-                  <span className="text-[var(--text-secondary)]">Cancelled</span>{" "}
-                  <span className={`font-medium ${airport.cancelled > 0 ? "text-[var(--red)]" : ""}`}>
-                    {airport.cancelled}
-                  </span>
-                </p>
+                {airport.delayed > 0 && (
+                  <p>
+                    <span className="text-[var(--text-secondary)]">Delayed</span>{" "}
+                    <span className="font-medium text-[var(--amber)]">{airport.delayed}</span>
+                  </p>
+                )}
+                {airport.cancelled > 0 && (
+                  <p>
+                    <span className="text-[var(--text-secondary)]">Cancelled</span>{" "}
+                    <span className="font-medium text-[var(--red)]">{airport.cancelled}</span>
+                  </p>
+                )}
               </div>
               <p className="mt-3 text-xs text-[var(--text-secondary)]">
                 Last data: {relativeTime(airport.latestFetch)}

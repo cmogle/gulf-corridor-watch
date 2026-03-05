@@ -172,7 +172,7 @@ export function MyTrackingPanel() {
                 </div>
                 <div className="mt-1 text-xs text-zinc-600">
                   <p>
-                    Flights: {row?.total ?? 0} | Delayed: {row?.delayed ?? 0} | Cancelled: {row?.cancelled ?? 0}
+                    Flights: {row?.total ?? 0}{(row?.delayed ?? 0) > 0 ? ` | Delayed: ${row?.delayed}` : ""}{(row?.cancelled ?? 0) > 0 ? ` | Cancelled: ${row?.cancelled}` : ""}
                   </p>
                   <p>Latest fetch: {row?.latest_fetch ? new Date(row.latest_fetch).toLocaleString() : "n/a"}</p>
                 </div>

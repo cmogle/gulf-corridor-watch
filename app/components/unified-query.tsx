@@ -232,12 +232,16 @@ export function UnifiedQuery({ suggestedPrompts = [], variant = "hero" }: Props)
               <span className={`rounded-lg px-3 py-1.5 text-xs font-mono ${isOnDark ? "bg-white/10 text-white/80" : "bg-gray-100 text-gray-700"}`}>
                 {result.data.summary.total} flights
               </span>
-              <span className={`rounded-lg px-3 py-1.5 text-xs font-mono ${isOnDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-50 text-amber-700"}`}>
-                {result.data.summary.delayed} delayed
-              </span>
-              <span className={`rounded-lg px-3 py-1.5 text-xs font-mono ${isOnDark ? "bg-red-500/20 text-red-300" : "bg-red-50 text-red-700"}`}>
-                {result.data.summary.cancelled} cancelled
-              </span>
+              {(result.data.summary.delayed ?? 0) > 0 && (
+                <span className={`rounded-lg px-3 py-1.5 text-xs font-mono ${isOnDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-50 text-amber-700"}`}>
+                  {result.data.summary.delayed} delayed
+                </span>
+              )}
+              {(result.data.summary.cancelled ?? 0) > 0 && (
+                <span className={`rounded-lg px-3 py-1.5 text-xs font-mono ${isOnDark ? "bg-red-500/20 text-red-300" : "bg-red-50 text-red-700"}`}>
+                  {result.data.summary.cancelled} cancelled
+                </span>
+              )}
               {trackIntent && (
                 <button onClick={handleTrack} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${isOnDark ? "bg-white/10 text-white hover:bg-white/20" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
                   Track {trackIntent.kind === "flight" ? "flight" : "route"}

@@ -158,7 +158,8 @@ test("fallback paragraph keeps flight operational numbers", () => {
   const paragraph = buildFallbackBriefParagraph(makeContext());
   assert.match(paragraph, /Commercial traffic sample shows 32 tracked flights in the last 45 minutes/i);
   assert.match(paragraph, /2 delayed/i);
-  assert.match(paragraph, /0 cancelled/i);
+  // Zero cancelled should be omitted, not shown
+  assert.doesNotMatch(paragraph, /0 cancelled/i);
 });
 
 test("fallback paragraph includes posture and guidance", () => {

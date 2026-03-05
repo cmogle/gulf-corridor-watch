@@ -83,12 +83,12 @@ export function StatusBar({
         {/* Center: flight stats (desktop only) */}
         <div className="hidden items-center gap-3 font-mono text-xs text-[var(--text-on-dark-muted)] lg:flex">
           <span>{flightTotal} tracked</span>
-          <span className={flightDelayed > 0 ? "text-[var(--amber)]" : ""}>
-            {flightDelayed} delayed
-          </span>
-          <span className={flightCancelled > 0 ? "text-[var(--red)]" : ""}>
-            {flightCancelled} cancelled
-          </span>
+          {flightDelayed > 0 && (
+            <span className="text-[var(--amber)]">{flightDelayed} delayed</span>
+          )}
+          {flightCancelled > 0 && (
+            <span className="text-[var(--red)]">{flightCancelled} cancelled</span>
+          )}
         </div>
 
         {/* Right: session + drawer toggle */}

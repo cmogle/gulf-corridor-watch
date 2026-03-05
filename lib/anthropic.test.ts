@@ -58,6 +58,8 @@ describe("anthropic client module", () => {
         prompt_tokens: null,
         completion_tokens: null,
         total_tokens: null,
+        cache_creation_input_tokens: null,
+        cache_read_input_tokens: null,
       });
     });
 
@@ -68,6 +70,8 @@ describe("anthropic client module", () => {
         prompt_tokens: null,
         completion_tokens: null,
         total_tokens: null,
+        cache_creation_input_tokens: null,
+        cache_read_input_tokens: null,
       });
     });
 
@@ -81,6 +85,27 @@ describe("anthropic client module", () => {
         prompt_tokens: 100,
         completion_tokens: 50,
         total_tokens: 150,
+        cache_creation_input_tokens: null,
+        cache_read_input_tokens: null,
+      });
+    });
+
+    it("includes cache usage when provided", async () => {
+      const { extractClaudeUsage } = await import("./anthropic");
+      const result = extractClaudeUsage({
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_usage: {
+          cache_creation_input_tokens: 2000,
+          cache_read_input_tokens: 3500,
+        },
+      });
+      assert.deepEqual(result, {
+        prompt_tokens: 100,
+        completion_tokens: 50,
+        total_tokens: 150,
+        cache_creation_input_tokens: 2000,
+        cache_read_input_tokens: 3500,
       });
     });
 

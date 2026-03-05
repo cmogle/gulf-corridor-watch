@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { SourceDef } from "./sources";
 import { generateText, hasAnthropicKey } from "./anthropic";
 
@@ -134,7 +135,22 @@ function detectLanguage(text: string): string {
   return "unknown";
 }
 
+/**
+ * In-memory translation cache keyed by text hash.
+ * Prevents redundant LLM calls for duplicate/repeated non-English content.
+ */
+const _translationCache = new Map<string, string>();
+const MAX_TRANSLATION_CACHE_SIZE = 200;
+
+function textHash(text: string): string {
+  return createHash("sha256").update(text.trim()).digest("hex").slice(0, 16);
+}
+
 async function translateWithTimeout(text: string, timeoutMs = 8000): Promise<string> {
+  const hash = textHash(text);
+  const cached = _translationCache.get(hash);
+  if (cached) return cached;
+
   const result = await generateText({
     model: "claude-sonnet-4-6",
     temperature: 0,
@@ -143,7 +159,16 @@ async function translateWithTimeout(text: string, timeoutMs = 8000): Promise<str
       "Translate to concise operational English. Preserve named entities, flight numbers, timestamps, and warning tone. Return only the translated text.",
     userMessage: text,
   });
-  return result.text.trim();
+
+  const translated = result.text.trim();
+  if (translated) {
+    if (_translationCache.size >= MAX_TRANSLATION_CACHE_SIZE) {
+      const oldest = _translationCache.keys().next().value;
+      if (oldest) _translationCache.delete(oldest);
+    }
+    _translationCache.set(hash, translated);
+  }
+  return translated;
 }
 
 async function maybeTranslate(text: string): Promise<{

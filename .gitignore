@@ -45,3 +45,9 @@ supabase/.temp/
 
 # worktrees
 .worktrees/
+
+# playwright MCP logs
+.playwright-mcp/
+
+# dev screenshots
+atlas-*.png

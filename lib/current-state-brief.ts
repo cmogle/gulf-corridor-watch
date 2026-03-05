@@ -482,6 +482,70 @@ function isLowValueEvidence(text: string): boolean {
   return alphaCount < 24;
 }
 
+/**
+ * Detects whether evidence text references an event date significantly in the past.
+ * Returns true if the text contains a date more than `maxAgeDays` days before `nowMs`.
+ */
+export function hasStaleEventDate(text: string, nowMs: number, maxAgeDays = 3): boolean {
+  // Match patterns like "February 25, 2026", "25 February 2026", "Feb 25, 2026", "09 March 2026"
+  const datePatterns = [
+    /\b(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b/gi,
+    /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})\b/gi,
+    /\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})\b/gi,
+    /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s+(\d{4})\b/gi,
+  ];
+  const cutoff = nowMs - maxAgeDays * 24 * 60 * 60_000;
+  for (const pattern of datePatterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      const parsed = new Date(match[0].replace(",", ""));
+      if (!Number.isNaN(parsed.getTime()) && parsed.getTime() < cutoff) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Sanitize flight data for LLM consumption: omit zero delayed/cancelled to prevent
+ * the model from emitting "(0 delayed, 0 cancelled)" noise.
+ */
+export function sanitizeFlightForLlm(flight: { total: number; delayed: number; cancelled: number; latest_fetch: string | null; stale?: boolean }): Record<string, unknown> {
+  const out: Record<string, unknown> = { total: flight.total };
+  if (flight.delayed > 0) out.delayed = flight.delayed;
+  if (flight.cancelled > 0) out.cancelled = flight.cancelled;
+  if (flight.latest_fetch) out.latest_fetch = flight.latest_fetch;
+  if (flight.stale) out.stale = flight.stale;
+  return out;
+}
+
+/**
+ * Filter advisory rows for LLM context using the same relevance/quality checks
+ * applied to narrative evidence rows — prevents irrelevant or stale signals
+ * from reaching the model.
+ */
+export function filterAdvisoryRowsForLlm(
+  context: BriefInputContext,
+  nowMs?: number,
+): Array<{ source: string; status_level: string; fetched_at: string; summary: string }> {
+  const now = nowMs ?? Date.now();
+  return context.sources
+    .filter((row) => row.status_level === "advisory" || row.status_level === "disrupted")
+    .filter((row) => {
+      const evidenceText = compact(`${cleanEvidenceText(row.title)}. ${cleanEvidenceText(row.summary)}`, 200);
+      if (isLowValueEvidence(evidenceText)) return false;
+      if (!isRegionallyRelevantEvidence(evidenceText, row.source_id)) return false;
+      if (relevanceScore(evidenceText) === 0) return false;
+      if (hasStaleEventDate(evidenceText, now)) return false;
+      return true;
+    })
+    .map((row) => ({
+      source: row.source_name,
+      status_level: row.status_level,
+      fetched_at: row.fetched_at,
+      summary: compact(`${row.title}. ${row.summary}`, 180),
+    }));
+}
+
 function buildEvidenceClause(row: BriefSourceContext): string {
   const title = cleanEvidenceText(row.title);
   const summary = cleanEvidenceText(row.summary);
@@ -508,12 +572,14 @@ function selectNarrativeEvidenceRows(context: BriefInputContext, maxRows = 12): 
     return toMillis(b.fetched_at) - toMillis(a.fetched_at);
   });
 
+  const nowMs = Date.now();
   const out: NarrativeEvidenceRow[] = [];
   for (const row of rows) {
     const evidenceText = buildEvidenceClause(row);
     if (isLowValueEvidence(evidenceText)) continue;
     if (!isRegionallyRelevantEvidence(evidenceText, row.source_id)) continue;
     if (relevanceScore(evidenceText) === 0) continue;
+    if (hasStaleEventDate(evidenceText, nowMs)) continue;
     const key = normalizeForDedup(evidenceText);
     if (!key || seen.has(key)) continue;
     seen.add(key);
@@ -940,25 +1006,18 @@ async function generateBriefParagraphWithModel(
   const model = process.env.CURRENT_STATE_BRIEF_MODEL?.trim() || DEFAULT_MODEL;
 
   try {
-    const advisoryRows = context.sources
-      .filter((row) => row.status_level === "advisory" || row.status_level === "disrupted")
-      .map((row) => ({
-        source: row.source_name,
-        status_level: row.status_level,
-        fetched_at: row.fetched_at,
-        summary: compact(`${row.title}. ${row.summary}`, 180),
-      }));
+    const advisoryRows = filterAdvisoryRowsForLlm(context);
     const result = await generateText({
       model,
       temperature: 0.1,
       timeoutMs,
       system:
-        "You write a UAE resident airspace situation brief. Output strict JSON only: {\"paragraph\": string}. Requirements: one concise English paragraph (90-140 words) structured as posture, confirmed signals, unknowns, and practical implication. Use only provided snippets; no speculation and no invented facts. Keep operational flight counts if available. Mention official X only when corroborated_social_rows are provided. Do not include source/feed quantification.",
+        "You write a UAE resident airspace situation brief. Output strict JSON only: {\"paragraph\": string}. Requirements: one concise English paragraph (90-140 words). Begin with timestamp and airspace posture assessment (normal/heightened/unclear). Follow with confirmed signals from the evidence. Note any data gaps or uncertainties. End with practical guidance for travelers. Use only provided snippets; no speculation and no invented facts. Include flight count only when non-zero disruptions exist. Do not emit '0 delayed' or '0 cancelled'. Do not use section labels like 'Confirmed signals:' — write flowing prose. Mention official X only when corroborated_social_rows are provided. Do not include source/feed quantification.",
       userMessage: JSON.stringify(
         {
           narrative_policy_version: NARRATIVE_POLICY_VERSION,
           timestamp_gst: formatDubaiTime(context.computed_at),
-          flight: context.flight,
+          flight: sanitizeFlightForLlm(context.flight),
           source_evidence_rows: basis.source_evidence_rows,
           corroborated_social_rows: basis.corroborated_social_rows,
           freshness_caveat_required: basis.freshness_caveat_required,
@@ -1094,6 +1153,7 @@ export async function refreshCurrentStateBrief(opts?: { forceRegenerate?: boolea
   item: CurrentStateBrief;
   regenerated: boolean;
   reason: string;
+  input_hash: string;
 }> {
   const startedAt = Date.now();
   const supabase = await getSupabaseAdminClient();
@@ -1133,7 +1193,7 @@ export async function refreshCurrentStateBrief(opts?: { forceRegenerate?: boolea
         social_gate_policy: context.context_gating.social.policy,
       },
     });
-    return { item: rowToBrief(updated as PersistedBriefRow), regenerated: false, reason: "unchanged_input_hash" };
+    return { item: rowToBrief(updated as PersistedBriefRow), regenerated: false, reason: "unchanged_input_hash", input_hash: hash };
   }
 
   const basis = buildNarrativeBasis(context);
@@ -1229,5 +1289,6 @@ export async function refreshCurrentStateBrief(opts?: { forceRegenerate?: boolea
     item: rowToBrief(saved as PersistedBriefRow),
     regenerated: true,
     reason: generation.model ? "input_changed_regenerated_model" : (generation.fallback_reason ?? "input_changed_regenerated_fallback"),
+    input_hash: hash,
   };
 }

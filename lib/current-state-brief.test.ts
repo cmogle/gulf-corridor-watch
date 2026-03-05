@@ -6,8 +6,11 @@ import {
   computeBriefInputHashForPolicy,
   deriveBriefFreshnessState,
   extractBriefJsonObject,
+  filterAdvisoryRowsForLlm,
+  hasStaleEventDate,
   isSourceStale,
   isNarrativePolicyCompliant,
+  sanitizeFlightForLlm,
   NARRATIVE_POLICY_VERSION,
   type BriefInputContext,
 } from "./current-state-brief.ts";
@@ -313,4 +316,131 @@ test("policy compliance rejects source/feed count phrasing and disallowed x ment
 test("json extraction handles markdown code fences", () => {
   const payload = "```json\n{\"paragraph\":\"Status stable.\"}\n```";
   assert.equal(extractBriefJsonObject(payload), "{\"paragraph\":\"Status stable.\"}");
+});
+
+// --- hasStaleEventDate ---
+
+test("hasStaleEventDate detects past dates in evidence text", () => {
+  const march5 = new Date("2026-03-05T12:00:00Z").getTime();
+  // Feb 25 is 8 days ago → stale
+  assert.equal(hasStaleEventDate("starting February 25, 2026", march5), true);
+  assert.equal(hasStaleEventDate("starting 25 February 2026", march5), true);
+  assert.equal(hasStaleEventDate("starting Feb 25, 2026", march5), true);
+  // March 9 is in the future → not stale
+  assert.equal(hasStaleEventDate("until 15:00 on Monday, 09 March 2026", march5), false);
+  // March 3 is 2 days ago (within 3-day window) → not stale
+  assert.equal(hasStaleEventDate("issued March 3, 2026", march5), false);
+  // No dates → not stale
+  assert.equal(hasStaleEventDate("All flights operating normally", march5), false);
+});
+
+// --- sanitizeFlightForLlm ---
+
+test("sanitizeFlightForLlm omits zero delayed and cancelled", () => {
+  const result = sanitizeFlightForLlm({
+    total: 140,
+    delayed: 0,
+    cancelled: 0,
+    latest_fetch: "2026-03-05T10:00:00Z",
+  });
+  assert.equal(result.total, 140);
+  assert.equal(result.delayed, undefined);
+  assert.equal(result.cancelled, undefined);
+  assert.equal(result.latest_fetch, "2026-03-05T10:00:00Z");
+});
+
+test("sanitizeFlightForLlm keeps non-zero disruption counts", () => {
+  const result = sanitizeFlightForLlm({
+    total: 140,
+    delayed: 5,
+    cancelled: 2,
+    latest_fetch: "2026-03-05T10:00:00Z",
+  });
+  assert.equal(result.delayed, 5);
+  assert.equal(result.cancelled, 2);
+});
+
+// --- filterAdvisoryRowsForLlm ---
+
+test("filterAdvisoryRowsForLlm rejects non-UAE irrelevant signals", () => {
+  const ctx = makeContext({
+    sources: [
+      {
+        source_id: "oman_air",
+        source_name: "Oman Air Travel Updates",
+        status_level: "advisory",
+        reliability: "reliable",
+        validation_state: "validated",
+        priority: 70,
+        fetched_at: "2026-03-05T10:00:00Z",
+        published_at: null,
+        freshness_target_minutes: 10,
+        title: "Oman Air Travel Updates",
+        summary: "Oman Air will begin operating from Terminal 5 at Riyadh King Khalid International Airport starting February 25, 2026.",
+        stale: false,
+      },
+      {
+        source_id: "air_arabia_updates",
+        source_name: "Air Arabia Travel Updates",
+        status_level: "advisory",
+        reliability: "reliable",
+        validation_state: "validated",
+        priority: 85,
+        fetched_at: "2026-03-05T10:00:00Z",
+        published_at: null,
+        freshness_target_minutes: 10,
+        title: "Air Arabia Travel Updates",
+        summary: "Air Arabia flights to and from the UAE are temporarily suspended until 15:00 (UAE time) on Monday, 09 March 2026.",
+        stale: false,
+      },
+    ],
+  });
+
+  const nowMs = new Date("2026-03-05T12:00:00Z").getTime();
+  const rows = filterAdvisoryRowsForLlm(ctx, nowMs);
+
+  // Air Arabia (UAE-relevant, future date) should pass
+  assert.equal(rows.some((r) => r.source.includes("Air Arabia")), true);
+  // Oman Air Riyadh (not UAE-relevant, past date) should be filtered out
+  assert.equal(rows.some((r) => r.source.includes("Oman Air")), false);
+});
+
+test("fallback paragraph filters out stale-dated evidence", () => {
+  const paragraph = buildFallbackBriefParagraph(
+    makeContext({
+      sources: [
+        {
+          source_id: "oman_air",
+          source_name: "Oman Air Travel Updates",
+          status_level: "advisory",
+          reliability: "reliable",
+          validation_state: "validated",
+          priority: 70,
+          fetched_at: "2026-03-05T10:00:00Z",
+          published_at: null,
+          freshness_target_minutes: 10,
+          title: "Terminal change",
+          summary: "Oman Air will begin operating from Terminal 5 at Riyadh King Khalid International Airport starting February 25, 2026.",
+          stale: false,
+        },
+      ],
+      flight: { total: 100, delayed: 0, cancelled: 0, latest_fetch: "2026-03-05T10:00:00Z", stale: false },
+    }),
+  );
+  // Riyadh terminal change should not appear
+  assert.doesNotMatch(paragraph, /Riyadh/i);
+  assert.doesNotMatch(paragraph, /Terminal 5/i);
+});
+
+test("fallback paragraph suppresses zero disruption parenthetical", () => {
+  const paragraph = buildFallbackBriefParagraph(
+    makeContext({
+      flight: { total: 140, delayed: 0, cancelled: 0, latest_fetch: "2026-03-05T10:00:00Z", stale: false },
+    }),
+  );
+  assert.match(paragraph, /140 tracked flights/);
+  assert.doesNotMatch(paragraph, /0 delayed/);
+  assert.doesNotMatch(paragraph, /0 cancelled/);
+  // Should NOT have parenthetical at all
+  assert.doesNotMatch(paragraph, /\(.*delayed.*\)/);
 });

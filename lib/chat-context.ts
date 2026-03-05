@@ -92,10 +92,29 @@ export async function storeChatMessage(
 }
 
 /**
+ * In-memory cache for situation context.
+ * All chat users within the same TTL window share the same assembled context,
+ * avoiding 4 redundant DB queries per chat message.
+ * On Vercel serverless, this persists within a warm lambda instance.
+ */
+let _situationContextCache: { text: string; ts: number } | null = null;
+const SITUATION_CONTEXT_TTL_MS = 2 * 60_000; // 2 minutes
+
+/** Invalidate the situation context cache (call after ingestion/brief refresh). */
+export function invalidateSituationContextCache(): void {
+  _situationContextCache = null;
+}
+
+/**
  * Build the situation context block injected into every chat turn.
  * Includes: current brief, source snapshots, social signals.
+ * Results are cached in-memory for SITUATION_CONTEXT_TTL_MS.
  */
 export async function buildSituationContext(): Promise<string> {
+  if (_situationContextCache && Date.now() - _situationContextCache.ts < SITUATION_CONTEXT_TTL_MS) {
+    return _situationContextCache.text;
+  }
+
   const parts: string[] = [];
   const supabase = getSupabaseAdmin();
   const gating = getContextGatingConfig();
@@ -231,7 +250,9 @@ export async function buildSituationContext(): Promise<string> {
     }
   }
 
-  return parts.join("\n");
+  const text = parts.join("\n");
+  _situationContextCache = { text, ts: Date.now() };
+  return text;
 }
 
 /**
@@ -306,6 +327,51 @@ const ROUTE_CARRIERS: Record<string, Array<{ airline: string; iata: string; flig
  */
 export async function buildRouteIntelligence(intent: FlightIntent): Promise<string> {
   if (intent.type === "unknown") return "";
+
+  // Airport intent — intelligence is provided by airportDataToContext in the chat route
+  if (intent.type === "airport") {
+    const parts: string[] = [`=== AIRPORT INTELLIGENCE: ${intent.codes.join("/")} ===`];
+    const dirLabel = intent.direction === "both" ? "arrivals & departures" : intent.direction;
+    parts.push(`Query: ${dirLabel} at ${intent.label}`);
+
+    const supabase = getSupabaseAdmin();
+
+    // Airline status
+    try {
+      const airlineSources = [
+        "emirates_updates", "etihad_advisory", "flydubai_updates",
+        "air_arabia_updates", "qatar_airways_updates", "oman_air",
+      ];
+      const { data: airlineSnapshots } = await supabase
+        .from("latest_source_snapshots")
+        .select("source_id,source_name,title,summary,status_level,fetched_at")
+        .in("source_id", airlineSources);
+
+      if (airlineSnapshots && airlineSnapshots.length > 0) {
+        parts.push("\nAirline status:");
+        for (const snap of airlineSnapshots) {
+          const statusTag = snap.status_level === "normal" ? "OPERATING" :
+            snap.status_level === "advisory" ? "ADVISORY" : "DISRUPTED";
+          parts.push(`  [${snap.source_name}] ${statusTag}: ${String(snap.title ?? "").slice(0, 120)} (fetched: ${snap.fetched_at})`);
+        }
+      }
+    } catch { /* Non-critical */ }
+
+    // Airspace status
+    try {
+      const { data: gcaa } = await supabase
+        .from("latest_source_snapshots")
+        .select("title,summary,status_level,fetched_at")
+        .eq("source_id", "gcaa_uae")
+        .single();
+      if (gcaa) {
+        const statusTag = gcaa.status_level === "normal" ? "OPEN" : "RESTRICTED/DISRUPTED";
+        parts.push(`\nUAE airspace (GCAA): ${statusTag} — ${String(gcaa.title ?? "").slice(0, 120)} (fetched: ${gcaa.fetched_at})`);
+      }
+    } catch { /* Non-critical */ }
+
+    return parts.join("\n");
+  }
 
   const parts: string[] = ["=== ROUTE INTELLIGENCE ==="];
 

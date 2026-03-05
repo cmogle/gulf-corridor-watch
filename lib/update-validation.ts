@@ -98,10 +98,29 @@ export function computeUpdateContentHash(input: {
   return createHash("sha256").update(payload).digest("hex");
 }
 
+/**
+ * In-memory validation result cache keyed by content hash.
+ * Prevents redundant LLM calls when the same content is re-ingested.
+ * Bounded to MAX_VALIDATION_CACHE_SIZE entries.
+ */
+const _validationCache = new Map<string, ValidationMetadata>();
+const MAX_VALIDATION_CACHE_SIZE = 500;
+
+export function getValidationCacheSize(): number {
+  return _validationCache.size;
+}
+
 export async function validateOfficialUpdate(input: ValidateOfficialUpdateInput): Promise<ValidationMetadata> {
   const cfg = getUpdateValidationConfig();
   if (!cfg.enabled) return buildSkipped("LLM validation disabled by LLM_UPDATE_VALIDATION_ENABLED");
   if (!hasAnthropicKey()) return buildSkipped("ANTHROPIC_API_KEY not set; validation skipped");
+
+  // Check in-memory cache by content hash
+  const contentHash = computeUpdateContentHash(input);
+  const cached = _validationCache.get(contentHash);
+  if (cached) {
+    return { ...cached, validation_reason: `${cached.validation_reason} (cached)` };
+  }
 
   const nowIso = new Date().toISOString();
 
@@ -131,13 +150,22 @@ raw_context=${rawContext}`,
     const score = Number.isFinite(scoreRaw) ? clamp01(scoreRaw) : validated ? 0.8 : 0.2;
     const reason = typeof parsed.reason === "string" ? parsed.reason.slice(0, 400) : validated ? "Validated as actionable update" : "Classified as low-signal";
 
-    return {
+    const metadata: ValidationMetadata = {
       validation_state: validated ? "validated" : "unvalidated",
       validation_score: score,
       validation_reason: reason,
       validation_model: cfg.model,
       validated_at: nowIso,
     };
+
+    // Store in cache (evict oldest if full)
+    if (_validationCache.size >= MAX_VALIDATION_CACHE_SIZE) {
+      const oldest = _validationCache.keys().next().value;
+      if (oldest) _validationCache.delete(oldest);
+    }
+    _validationCache.set(contentHash, metadata);
+
+    return metadata;
   } catch (error) {
     return {
       validation_state: "failed",

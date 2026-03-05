@@ -1,6 +1,8 @@
 import { refreshCurrentStateBrief } from "@/lib/current-state-brief";
 import { logLlmTelemetry } from "@/lib/llm-telemetry";
 import { isCronAuthorized } from "@/lib/cron-auth";
+import { buildSituationContext, invalidateSituationContextCache } from "@/lib/chat-context";
+import { refreshPrecomputedAnswers } from "@/lib/precomputed-answers";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +15,22 @@ export async function GET(req: Request) {
 
   try {
     const result = await refreshCurrentStateBrief();
+
+    // Invalidate the situation context cache so next chat picks up fresh data
+    invalidateSituationContextCache();
+
+    // When the brief was regenerated, refresh precomputed answers in the background.
+    // This runs after the brief response is assembled so it doesn't block the cron.
+    let precomputedResult: { generated: number; skipped: number; errors: number } | null = null;
+    if (result.regenerated) {
+      try {
+        const situationContext = await buildSituationContext();
+        precomputedResult = await refreshPrecomputedAnswers(situationContext, result.input_hash);
+      } catch (err) {
+        console.error("Precomputed answers refresh failed:", err);
+      }
+    }
+
     logLlmTelemetry("brief_refresh_request", {
       route: "/api/brief/refresh",
       mode: "http",
@@ -24,6 +42,7 @@ export async function GET(req: Request) {
         regenerated: result.regenerated,
         freshness_state: result.item.freshness_state,
         confidence: result.item.confidence,
+        precomputed_answers: precomputedResult,
       },
     });
     return Response.json({
@@ -31,6 +50,7 @@ export async function GET(req: Request) {
       regenerated: result.regenerated,
       reason: result.reason,
       item: result.item,
+      precomputed_answers: precomputedResult,
       fetched_at: new Date().toISOString(),
     });
   } catch (error) {

@@ -4,6 +4,8 @@ import type { BriefInputContext } from "./current-state-brief";
 import {
   buildFallbackBriefParagraph,
   extractBriefJsonObject,
+  filterAdvisoryRowsForLlm,
+  sanitizeFlightForLlm,
   NARRATIVE_POLICY_VERSION,
 } from "./current-state-brief";
 import { detectCorrelations } from "./source-correlation";
@@ -58,9 +60,10 @@ Output strict JSON only, matching this schema:
 SECTION REQUIREMENTS:
 
 executive_summary (2-3 sentences, 40-60 words):
-- Lead with the current UAE airspace posture (normal/heightened/unclear)
+- Begin with timestamp and the current UAE airspace posture (normal/heightened/unclear)
 - State the most significant development
 - End with the bottom-line assessment for travelers
+- Write flowing prose; do not use section labels like "Confirmed signals:" or "Unknowns:"
 
 security (3-5 sentences):
 - Military and defense developments affecting the Gulf region
@@ -89,7 +92,7 @@ source_coverage (2-3 sentences):
 CONSTRAINTS:
 - Use only the provided evidence snippets and flight data; never invent facts
 - Use direct, authoritative language (like a trusted advisor, not a news anchor)
-- Include operational flight statistics when available
+- Include operational flight statistics when available; do not emit "0 delayed" or "0 cancelled" — omit zero disruption counts entirely
 - Do not mention "monitored sources" or quantify sources with numbers like "X of Y sources"
 - Each section must be self-contained and independently readable`;
 
@@ -117,9 +120,9 @@ function formatDubaiTime(iso: string): string {
 }
 
 function buildFallbackSections(context: BriefInputContext): BriefSections {
-  const securitySources = context.sources
-    .filter((s) => s.status_level === "disrupted" || s.status_level === "advisory")
-    .map((s) => `${s.source_name}: ${compact(s.title, 100)}`)
+  const filteredAdvisory = filterAdvisoryRowsForLlm(context);
+  const securitySources = filteredAdvisory
+    .map((s) => `${s.source}: ${compact(s.summary, 100)}`)
     .slice(0, 3);
 
   const security = securitySources.length > 0
@@ -228,14 +231,7 @@ export async function generateStructuredBrief(
   const timeoutMs = parsePositiveInt(process.env.CURRENT_STATE_BRIEF_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
   const model = process.env.CURRENT_STATE_BRIEF_MODEL?.trim() || DEFAULT_MODEL;
 
-  const advisoryRows = context.sources
-    .filter((row) => row.status_level === "advisory" || row.status_level === "disrupted")
-    .map((row) => ({
-      source: row.source_name,
-      status_level: row.status_level,
-      fetched_at: row.fetched_at,
-      summary: compact(`${row.title}. ${row.summary}`, 180),
-    }));
+  const advisoryRows = filterAdvisoryRowsForLlm(context);
 
   const correlation = detectCorrelations(context);
   const crisisStats = await formatCrisisStatsForBrief();
@@ -245,7 +241,7 @@ export async function generateStructuredBrief(
     timestamp_gst: formatDubaiTime(context.computed_at),
     freshness_state: context.freshness_state,
     confidence: context.confidence,
-    flight: context.flight,
+    flight: sanitizeFlightForLlm(context.flight),
     source_evidence_rows: basis.source_evidence_rows,
     corroborated_social_rows: basis.corroborated_social_rows,
     freshness_caveat_required: basis.freshness_caveat_required,

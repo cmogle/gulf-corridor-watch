@@ -5,6 +5,7 @@ import { generateText, hasAnthropicKey } from "./anthropic";
 export type FlightIntent =
   | { type: "flight_number"; flightNumber: string }
   | { type: "route"; originCodes: string[]; destinationCodes: string[]; originLabel: string; destinationLabel: string; airline?: { icao: string; iataPrefix: string } }
+  | { type: "airport"; codes: string[]; label: string; direction: "arrivals" | "departures" | "both"; airline?: { icao: string; iataPrefix: string } }
   | { type: "unknown" };
 
 export type FlightInsight = {
@@ -126,6 +127,22 @@ function resolveAirportToken(raw: string): { label: string; codes: string[] } | 
   return null;
 }
 
+/** Detect arrival/departure direction keywords in a query. */
+function detectDirection(query: string): "arrivals" | "departures" | "both" | null {
+  const q = query.toLowerCase();
+  const arrivalRe = /\b(land|landed|landing|arriv|arrival|arrivals|arriving|inbound|incoming|came in|touched down)\b/;
+  const departureRe = /\b(depart|departed|departing|departure|departures|takeoff|take off|taking off|took off|outbound|outgoing|left from)\b/;
+  const hasArrival = arrivalRe.test(q);
+  const hasDeparture = departureRe.test(q);
+  if (hasArrival && hasDeparture) return "both";
+  if (hasArrival) return "arrivals";
+  if (hasDeparture) return "departures";
+  // Generic airport activity keywords (no direction specified)
+  const genericRe = /\b(flights?\s+(at|from|into|out of|through)|how (busy|many flights)|traffic at|operations at|airport.{0,15}(status|busy|traffic))\b/i;
+  if (genericRe.test(q)) return "both";
+  return null;
+}
+
 export function parseFlightIntent(query: string): FlightIntent {
   const trimmed = query.trim();
   const upper = trimmed.toUpperCase();
@@ -211,14 +228,32 @@ export function parseFlightIntent(query: string): FlightIntent {
     };
   }
   if (iataCodes.length === 1) {
+    const direction = detectDirection(trimmed);
+    // Single airport code: treat as airport query (not a self-referencing route)
     return {
-      type: "route",
-      originCodes: [iataCodes[0]],
-      destinationCodes: [iataCodes[0]],
-      originLabel: iataCodes[0],
-      destinationLabel: iataCodes[0],
+      type: "airport",
+      codes: [iataCodes[0]],
+      label: iataCodes[0],
+      direction: direction ?? "both",
       airline,
     };
+  }
+
+  // No IATA codes found — check for city/airport name aliases with direction keywords
+  const direction = detectDirection(trimmed);
+  if (direction) {
+    const lower = cleanToken(trimmed);
+    for (const [alias, codes] of Object.entries(AIRPORT_ALIASES)) {
+      if (lower.includes(alias)) {
+        return {
+          type: "airport",
+          codes,
+          label: alias,
+          direction,
+          airline,
+        };
+      }
+    }
   }
 
   return { type: "unknown" };
@@ -322,7 +357,7 @@ function buildInsight(query: string, intent: FlightIntent, rows: FlightObservati
 }
 
 async function lookupFromDb(intent: FlightIntent, lookbackHours: number): Promise<FlightObservation[]> {
-  if (intent.type === "unknown") return [];
+  if (intent.type === "unknown" || intent.type === "airport") return [];
   const supabase = getSupabaseAdmin();
   const cutoff = new Date(Date.now() - lookbackHours * 60 * 60_000).toISOString();
 
@@ -349,8 +384,73 @@ async function lookupFromDb(intent: FlightIntent, lookbackHours: number): Promis
   return (data ?? []) as FlightObservation[];
 }
 
+export type AirportScheduleStats = {
+  airport: string;
+  board_type: string;
+  total: number;
+  delayed: number;
+  cancelled: number;
+  avg_delay_minutes: number | null;
+  latest_fetch: string | null;
+};
+
+export type AirportScheduleRow = {
+  flight_number: string;
+  airline: string | null;
+  origin_iata: string | null;
+  destination_iata: string | null;
+  scheduled_time: string;
+  estimated_time: string | null;
+  actual_time: string | null;
+  status: string;
+  is_delayed: boolean;
+  delay_minutes: number | null;
+  is_cancelled: boolean;
+  gate: string | null;
+  terminal: string | null;
+  fetched_at: string;
+};
+
+export type AirportQueryResult = {
+  stats: AirportScheduleStats[];
+  flights: AirportScheduleRow[];
+  direction: "arrivals" | "departures" | "both";
+};
+
+/** Query flight_schedules and flight_schedule_stats for an airport intent. */
+async function lookupAirportFromDb(
+  intent: FlightIntent & { type: "airport" },
+): Promise<AirportQueryResult> {
+  const supabase = getSupabaseAdmin();
+  const boardTypes = intent.direction === "both"
+    ? ["arrival", "departure"]
+    : [intent.direction === "arrivals" ? "arrival" : "departure"];
+
+  // Query stats view and individual flights in parallel
+  const [statsResult, flightsResult] = await Promise.all([
+    supabase
+      .from("flight_schedule_stats")
+      .select("*")
+      .in("airport", intent.codes)
+      .in("board_type", boardTypes),
+    supabase
+      .from("flight_schedules")
+      .select("flight_number,airline,origin_iata,destination_iata,scheduled_time,estimated_time,actual_time,status,is_delayed,delay_minutes,is_cancelled,gate,terminal,fetched_at")
+      .in("airport", intent.codes)
+      .in("board_type", boardTypes)
+      .gte("fetched_at", new Date(Date.now() - 6 * 60 * 60_000).toISOString())
+      .order("scheduled_time", { ascending: false })
+      .limit(200),
+  ]);
+
+  const stats = (statsResult.data ?? []) as AirportScheduleStats[];
+  const flights = (flightsResult.data ?? []) as AirportScheduleRow[];
+
+  return { stats, flights, direction: intent.direction };
+}
+
 async function lookupLive(intent: FlightIntent): Promise<FlightObservation[]> {
-  if (intent.type === "unknown") return [];
+  if (intent.type === "unknown" || intent.type === "airport") return [];
   if (intent.type === "flight_number") return findFlightByNumber(intent.flightNumber);
   if (intent.originCodes.length === 1 && intent.destinationCodes.length === 1) {
     return findRouteFlights(intent.originCodes[0], intent.destinationCodes[0]);
@@ -461,6 +561,44 @@ export async function runFlightQuery(queryText: string, options?: QueryOptions) 
       summary: { total: 0, delayed: 0, cancelled: 0, latest_fetch: null },
       flights: [] as FlightObservation[],
       insight: null as FlightInsight | null,
+      airportData: null as AirportQueryResult | null,
+    };
+  }
+
+  // Airport intent — query schedule board data instead of flight observations
+  if (intent.type === "airport") {
+    const airportData = await lookupAirportFromDb(intent);
+    const totalStats = airportData.stats.reduce((acc, s) => ({
+      total: acc.total + s.total,
+      delayed: acc.delayed + s.delayed,
+      cancelled: acc.cancelled + s.cancelled,
+    }), { total: 0, delayed: 0, cancelled: 0 });
+    const latestFetch = airportData.stats
+      .map((s) => s.latest_fetch)
+      .filter(Boolean)
+      .sort((a, b) => new Date(b!).getTime() - new Date(a!).getTime())[0] ?? null;
+
+    const supabase = getSupabaseAdmin();
+    await supabase.from("flight_query_logs").insert({
+      query,
+      resolved_filters: { intent, source: "schedule_board" },
+      result_count: airportData.flights.length,
+    });
+
+    return {
+      intent,
+      source: "cache" as const,
+      summary: { ...totalStats, latest_fetch: latestFetch },
+      flights: [] as FlightObservation[],
+      insight: {
+        type: "status" as const,
+        headline: `${intent.codes.join("/")} ${intent.direction}: ${totalStats.total} flights`,
+        summary: `${totalStats.delayed} delayed, ${totalStats.cancelled} cancelled in schedule board data.`,
+        confidence: (totalStats.total >= 10 ? "high" : totalStats.total >= 3 ? "medium" : "low") as FlightInsight["confidence"],
+        horizon_hours: 6,
+        score: null,
+      },
+      airportData,
     };
   }
 
@@ -498,6 +636,7 @@ export async function runFlightQuery(queryText: string, options?: QueryOptions) 
     summary: summarize(flights),
     flights,
     insight: advisoryInsight ?? buildInsight(query, intent, flights),
+    airportData: null as AirportQueryResult | null,
   };
 }
 
@@ -507,4 +646,32 @@ export function flightsToContextRows(flights: FlightObservation[]) {
 origin=${f.origin_iata ?? "n/a"} destination=${f.destination_iata ?? "n/a"} scheduled=${f.scheduled_time ?? "n/a"} estimated=${f.estimated_time ?? "n/a"} actual=${f.actual_time ?? "n/a"}
 source=${f.source_url}`;
   });
+}
+
+/** Format airport schedule data as LLM context. */
+export function airportDataToContext(data: AirportQueryResult): string {
+  const parts: string[] = [];
+
+  // Aggregate stats
+  if (data.stats.length > 0) {
+    parts.push("=== AIRPORT SCHEDULE BOARD STATS ===");
+    for (const s of data.stats) {
+      const statParts = [`${s.total} flights`];
+      if (s.delayed > 0) statParts.push(`${s.delayed} delayed`);
+      if (s.cancelled > 0) statParts.push(`${s.cancelled} cancelled`);
+      if (s.avg_delay_minutes != null) statParts.push(`avg delay ${Math.round(s.avg_delay_minutes)}min`);
+      parts.push(`[${s.airport} ${s.board_type}s] ${statParts.join(", ")} (latest fetch: ${s.latest_fetch ?? "n/a"})`);
+    }
+  }
+
+  // Individual flight details (sample)
+  if (data.flights.length > 0) {
+    parts.push(`\n=== SCHEDULE BOARD FLIGHTS (${data.flights.length} total, showing top 30) ===`);
+    for (const f of data.flights.slice(0, 30)) {
+      const delayTag = f.is_cancelled ? "CANCELLED" : f.is_delayed ? `DELAYED +${f.delay_minutes ?? "?"}min` : "ON TIME";
+      parts.push(`[${f.flight_number}] ${f.origin_iata ?? "?"} → ${f.destination_iata ?? "?"} | ${delayTag} | sched=${f.scheduled_time} | status=${f.status} | T${f.terminal ?? "?"} G${f.gate ?? "?"}`);
+    }
+  }
+
+  return parts.join("\n");
 }

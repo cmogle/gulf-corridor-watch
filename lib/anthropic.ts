@@ -26,6 +26,13 @@ export type GenerateTextOptions = {
   maxTokens?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Enable prompt caching on the system prompt (requires >=2048 tokens for Sonnet) */
+  cacheSystem?: boolean;
+};
+
+export type CacheUsage = {
+  cache_creation_input_tokens: number | null;
+  cache_read_input_tokens: number | null;
 };
 
 export type GenerateTextResult = {
@@ -34,6 +41,7 @@ export type GenerateTextResult = {
   output_tokens: number | null;
   total_tokens: number | null;
   model: string;
+  cache_usage: CacheUsage;
 };
 
 export async function generateText(opts: GenerateTextOptions): Promise<GenerateTextResult> {
@@ -41,12 +49,17 @@ export async function generateText(opts: GenerateTextOptions): Promise<GenerateT
   const model = opts.model ?? process.env.CURRENT_STATE_BRIEF_MODEL?.trim() ?? DEFAULT_MODEL;
   const maxTokens = opts.maxTokens ?? 1024;
 
+  // Use cached content block format when cacheSystem is enabled
+  const systemParam: string | Anthropic.Messages.TextBlockParam[] = opts.cacheSystem
+    ? [{ type: "text" as const, text: opts.system, cache_control: { type: "ephemeral" as const } }]
+    : opts.system;
+
   const response = await client.messages.create(
     {
       model,
       max_tokens: maxTokens,
       temperature: opts.temperature ?? 0.1,
-      system: opts.system,
+      system: systemParam,
       messages: [{ role: "user", content: opts.userMessage }],
     },
     {
@@ -60,6 +73,10 @@ export async function generateText(opts: GenerateTextOptions): Promise<GenerateT
     .map((block) => block.text)
     .join("");
 
+  // Access cache usage fields — these exist on the response but may not be in
+  // the SDK type definitions yet. Cast via unknown to access safely.
+  const usageAny = response.usage as unknown as Record<string, unknown> | undefined;
+
   return {
     text,
     input_tokens: response.usage?.input_tokens ?? null,
@@ -67,16 +84,34 @@ export async function generateText(opts: GenerateTextOptions): Promise<GenerateT
     total_tokens:
       response.usage ? (response.usage.input_tokens ?? 0) + (response.usage.output_tokens ?? 0) : null,
     model,
+    cache_usage: {
+      cache_creation_input_tokens: (usageAny?.cache_creation_input_tokens as number) ?? null,
+      cache_read_input_tokens: (usageAny?.cache_read_input_tokens as number) ?? null,
+    },
   };
 }
 
+export type StreamTextMessage = {
+  role: "user" | "assistant";
+  content: string | Anthropic.Messages.ContentBlockParam[];
+};
+
 export type StreamTextOptions = {
   system: string;
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  messages: Array<StreamTextMessage>;
   model?: string;
   temperature?: number;
   maxTokens?: number;
   timeoutMs?: number;
+  /** Enable prompt caching on the system prompt */
+  cacheSystem?: boolean;
+};
+
+export type StreamTextResult = {
+  text: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_usage: CacheUsage;
 };
 
 /**
@@ -85,16 +120,21 @@ export type StreamTextOptions = {
  */
 export function streamText(opts: StreamTextOptions): {
   stream: ReadableStream<Uint8Array>;
-  response: Promise<{ text: string; input_tokens: number | null; output_tokens: number | null }>;
+  response: Promise<StreamTextResult>;
 } {
   const client = getAnthropicClient();
   const model = opts.model ?? DEFAULT_MODEL;
   const maxTokens = opts.maxTokens ?? 2048;
 
-  let resolveResponse: (value: { text: string; input_tokens: number | null; output_tokens: number | null }) => void;
-  const response = new Promise<{ text: string; input_tokens: number | null; output_tokens: number | null }>((resolve) => {
+  let resolveResponse: (value: StreamTextResult) => void;
+  const response = new Promise<StreamTextResult>((resolve) => {
     resolveResponse = resolve;
   });
+
+  // Use cached content block format when cacheSystem is enabled
+  const systemParam: string | Anthropic.Messages.TextBlockParam[] = opts.cacheSystem
+    ? [{ type: "text" as const, text: opts.system, cache_control: { type: "ephemeral" as const } }]
+    : opts.system;
 
   const encoder = new TextEncoder();
   let fullText = "";
@@ -107,7 +147,7 @@ export function streamText(opts: StreamTextOptions): {
             model,
             max_tokens: maxTokens,
             temperature: opts.temperature ?? 0.1,
-            system: opts.system,
+            system: systemParam,
             messages: opts.messages,
           },
           {
@@ -126,14 +166,28 @@ export function streamText(opts: StreamTextOptions): {
         const finalMessage = await anthropicStream.finalMessage();
         const inputTokens = finalMessage.usage?.input_tokens ?? null;
         const outputTokens = finalMessage.usage?.output_tokens ?? null;
+        const usageAny = finalMessage.usage as unknown as Record<string, unknown> | undefined;
 
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
         controller.close();
-        resolveResponse!({ text: fullText, input_tokens: inputTokens, output_tokens: outputTokens });
+        resolveResponse!({
+          text: fullText,
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+          cache_usage: {
+            cache_creation_input_tokens: (usageAny?.cache_creation_input_tokens as number) ?? null,
+            cache_read_input_tokens: (usageAny?.cache_read_input_tokens as number) ?? null,
+          },
+        });
       } catch (error) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: String(error) })}\n\n`));
         controller.close();
-        resolveResponse!({ text: fullText, input_tokens: null, output_tokens: null });
+        resolveResponse!({
+          text: fullText,
+          input_tokens: null,
+          output_tokens: null,
+          cache_usage: { cache_creation_input_tokens: null, cache_read_input_tokens: null },
+        });
       }
     },
   });
@@ -141,12 +195,18 @@ export function streamText(opts: StreamTextOptions): {
   return { stream, response };
 }
 
-export function extractClaudeUsage(usage?: { input_tokens?: number | null; output_tokens?: number | null } | null) {
-  const input = usage?.input_tokens ?? null;
-  const output = usage?.output_tokens ?? null;
+export function extractClaudeUsage(result?: {
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_usage?: CacheUsage;
+} | null) {
+  const input = result?.input_tokens ?? null;
+  const output = result?.output_tokens ?? null;
   return {
     prompt_tokens: input,
     completion_tokens: output,
     total_tokens: input != null && output != null ? input + output : null,
+    cache_creation_input_tokens: result?.cache_usage?.cache_creation_input_tokens ?? null,
+    cache_read_input_tokens: result?.cache_usage?.cache_read_input_tokens ?? null,
   };
 }

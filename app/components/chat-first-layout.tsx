@@ -75,6 +75,11 @@ export function ChatFirstLayout({
     setHasStartedChat(true);
   }, []);
 
+  const handleBackToHome = useCallback(() => {
+    setHasStartedChat(false);
+    setPendingPrompt(undefined);
+  }, []);
+
   const handleOpenBriefing = useCallback(() => {
     setActiveTab("briefing");
     setIsDrawerOpen(true);
@@ -116,6 +121,7 @@ export function ChatFirstLayout({
               suggestedPrompts={suggestedPrompts}
               initialPrompt={pendingPrompt}
               onFirstMessage={handleFirstMessage}
+              onBackToHome={handleBackToHome}
             />
           )}
         </div>

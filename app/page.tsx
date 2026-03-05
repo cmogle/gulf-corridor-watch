@@ -50,7 +50,7 @@ function buildFlightPromptSuggestions(pulse: FlightPulseData): string[] {
   const prompts: string[] = [];
   for (const item of validRoutes.slice(0, 3)) {
     const [origin, destination] = item.route.split(" -> ");
-    prompts.push(`${item.route} delayed now`);
+    prompts.push(`${origin} > ${destination} delayed now`);
     prompts.push(`What is the likelihood of getting from ${origin} to ${destination} in the next 24 hours?`);
   }
 

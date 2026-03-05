@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AirspacePosture } from "./layout-types";
 
 type ChatHomeProps = {
@@ -12,12 +13,17 @@ type ChatHomeProps = {
   onOpenBriefing?: () => void;
 };
 
-const DEFAULT_PROMPTS = [
-  "Can I fly to Dubai right now?",
-  "DXB delays and cancellations",
-  "Is it safe to travel to the UAE?",
-  "What airlines are affected?",
+/** Rotating placeholder examples — disappear once the user starts typing */
+const PLACEHOLDER_CYCLE = [
+  "Is my flight to Dubai still operating?",
+  "LCA > DXB alternatives today",
+  "Which airlines are suspended?",
+  "EK202 status right now",
+  "Is UAE airspace open?",
+  "Safest route to Abu Dhabi",
 ];
+
+const CYCLE_INTERVAL_MS = 3500;
 
 function PostureDot({ posture }: { posture: AirspacePosture }) {
   const color =
@@ -56,6 +62,21 @@ function truncateSentences(text: string, max: number): { text: string; truncated
   return { text: sentences.slice(0, max).join(" ").trim(), truncated: true };
 }
 
+/** Hook: cycle through placeholder strings, pausing when user has typed */
+function useCyclingPlaceholder(items: string[], intervalMs: number, pause: boolean) {
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    if (pause) return;
+    const id = setInterval(() => {
+      setIndex((i) => (i + 1) % items.length);
+    }, intervalMs);
+    return () => clearInterval(id);
+  }, [items.length, intervalMs, pause]);
+
+  return items[index];
+}
+
 export function ChatHome({
   posture,
   briefingSummary,
@@ -65,61 +86,111 @@ export function ChatHome({
   onPromptClick,
   onOpenBriefing,
 }: ChatHomeProps) {
-  const prompts = suggestedPrompts.length > 0
-    ? [...new Set([...suggestedPrompts, ...DEFAULT_PROMPTS])].slice(0, 6)
-    : DEFAULT_PROMPTS;
+  const [input, setInput] = useState("");
+  const [isFocused, setIsFocused] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Build chip list: use dynamic suggested prompts, limit to 4 short ones
+  const chips = (suggestedPrompts.length > 0 ? suggestedPrompts : []).slice(0, 4);
 
   const brief = truncateSentences(briefingSummary, 3);
 
+  // Cycle placeholder when input is empty and not focused
+  const placeholder = useCyclingPlaceholder(
+    PLACEHOLDER_CYCLE,
+    CYCLE_INTERVAL_MS,
+    isFocused || input.length > 0,
+  );
+
+  const handleSubmit = useCallback(() => {
+    const q = input.trim();
+    if (!q) return;
+    setInput("");
+    onPromptClick(q);
+  }, [input, onPromptClick]);
+
   return (
-    <div className="flex flex-1 items-center justify-center px-4 py-8">
-      <div className="w-full max-w-2xl space-y-8 animate-fade-in-up">
-        {/* Posture headline */}
-        <div className="space-y-3 text-center">
-          <div className="flex items-center justify-center gap-3">
-            <PostureDot posture={posture} />
-            <h1 className="font-serif text-3xl text-[var(--text-primary)] md:text-4xl">
-              {postureHeadline(posture)}
-            </h1>
+    <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Scrollable content area */}
+      <div className="flex flex-1 items-center justify-center overflow-y-auto px-4 py-8">
+        <div className="w-full max-w-2xl space-y-6 animate-fade-in-up">
+          {/* Posture headline */}
+          <div className="space-y-3 text-center">
+            <div className="flex items-center justify-center gap-3">
+              <PostureDot posture={posture} />
+              <h1 className="font-serif text-3xl text-[var(--text-primary)] md:text-4xl">
+                {postureHeadline(posture)}
+              </h1>
+            </div>
+            <p className="mx-auto max-w-lg text-[15px] leading-relaxed text-[var(--text-secondary)]">
+              {brief.text}
+              {brief.truncated && onOpenBriefing && (
+                <>
+                  {" "}
+                  <button
+                    onClick={onOpenBriefing}
+                    className="inline text-[var(--primary-blue)] hover:underline"
+                  >
+                    Full briefing &rarr;
+                  </button>
+                </>
+              )}
+            </p>
           </div>
-          <p className="mx-auto max-w-lg text-[15px] leading-relaxed text-[var(--text-secondary)]">
-            {brief.text}
-            {brief.truncated && onOpenBriefing && (
-              <>
-                {" "}
+
+          {/* Footer */}
+          <p className="text-center text-xs text-[var(--text-secondary)]">
+            Updated {relativeTime(updatedAt)} &middot; {sourceCount} sources reporting
+          </p>
+        </div>
+      </div>
+
+      {/* Chat input + chips — pinned to bottom */}
+      <div className="border-t border-gray-100 bg-[var(--surface-light)] px-4 pb-4 pt-3">
+        <div className="mx-auto w-full max-w-2xl space-y-2.5">
+          {/* Input */}
+          <div className="relative">
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit();
+                }
+              }}
+              placeholder={placeholder}
+              className="w-full rounded-xl border-0 bg-white px-4 py-3.5 pr-20 text-[15px] text-[var(--text-primary)] shadow-lg outline-none ring-2 ring-transparent placeholder:text-[var(--text-secondary)] placeholder:transition-opacity focus:ring-[var(--primary-blue)]"
+              aria-label="Ask a question"
+            />
+            <button
+              onClick={handleSubmit}
+              disabled={!input.trim()}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-[var(--surface-dark)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              Ask
+            </button>
+          </div>
+
+          {/* Compact suggestion chips */}
+          {chips.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto scrollbar-none">
+              {chips.map((chip) => (
                 <button
-                  onClick={onOpenBriefing}
-                  className="inline text-[var(--primary-blue)] hover:underline"
+                  key={chip}
+                  onClick={() => onPromptClick(chip)}
+                  className="shrink-0 rounded-full border border-gray-200 bg-white/80 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] transition-colors hover:border-gray-300 hover:text-[var(--text-primary)]"
                 >
-                  Full briefing &rarr;
+                  {chip}
                 </button>
-              </>
-            )}
-          </p>
+              ))}
+            </div>
+          )}
         </div>
-
-        {/* Suggested prompts */}
-        <div className="space-y-3">
-          <p className="text-center text-xs font-medium uppercase tracking-widest text-[var(--text-secondary)]">
-            Ask anything
-          </p>
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-            {prompts.map((prompt) => (
-              <button
-                key={prompt}
-                onClick={() => onPromptClick(prompt)}
-                className="rounded-xl border border-gray-200 bg-white px-4 py-3.5 text-left text-[14px] text-[var(--text-primary)] shadow-sm transition-all hover:border-gray-300 hover:shadow-md active:scale-[0.98]"
-              >
-                {prompt}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <p className="text-center text-xs text-[var(--text-secondary)]">
-          Updated {relativeTime(updatedAt)} &middot; {sourceCount} sources reporting
-        </p>
       </div>
     </div>
   );

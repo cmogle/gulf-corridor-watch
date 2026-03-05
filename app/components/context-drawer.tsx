@@ -1,19 +1,15 @@
 "use client";
 
-import { useEffect } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { ContextDrawerTab, FlightPulseData, SuppressedSource } from "./layout-types";
 import type { CurrentStateBrief } from "@/lib/current-state-brief";
 import type { UnifiedUpdateItem } from "@/lib/unified-updates-types";
-import { SituationBriefing } from "./situation-briefing";
-import { FlightDetailProvider } from "./flight-detail/context";
-import { AirspacePulseAtlas } from "./pulse-atlas";
-import { FlightPulseWithDetail } from "./flight-detail/flight-pulse-wrapper";
-import { UpdatesFeed } from "./updates-feed";
-import { CrisisPanel } from "./crisis-timeline";
-import { ExpertAnalysisPanel } from "./expert-analysis-panel";
-import { ResourcesPanel } from "./resources-panel";
-import { MyTrackingPanel } from "./my-tracking-panel";
-import { SourceHealth } from "./source-health";
+
+// Lazy-load tab contents — only downloaded when first activated
+const BriefingTab = lazy(() => import("./drawer-tabs/briefing-tab"));
+const FlightsTab = lazy(() => import("./drawer-tabs/flights-tab"));
+const FeedTab = lazy(() => import("./drawer-tabs/feed-tab"));
+const ResourcesTab = lazy(() => import("./drawer-tabs/resources-tab"));
 
 type ContextDrawerProps = {
   isOpen: boolean;
@@ -39,6 +35,16 @@ const TABS: { id: ContextDrawerTab; label: string }[] = [
   { id: "resources", label: "Resources" },
 ];
 
+const DRAG_DISMISS_THRESHOLD = 0.3; // 30% of sheet height
+
+function TabLoader() {
+  return (
+    <div className="flex items-center justify-center py-12">
+      <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-[var(--primary-blue)]" />
+    </div>
+  );
+}
+
 export function ContextDrawer({
   isOpen,
   onClose,
@@ -51,6 +57,28 @@ export function ContextDrawer({
   healthySources,
   suppressedSources,
 }: ContextDrawerProps) {
+  // Track which tabs have been visited so they stay mounted (hidden) after first load
+  const [visitedTabs, setVisitedTabs] = useState<Set<ContextDrawerTab>>(new Set);
+  const prevOpen = useRef(isOpen);
+
+  // When drawer opens or active tab changes, mark the current tab as visited
+  useEffect(() => {
+    if (isOpen) {
+      setVisitedTabs((prev) => {
+        if (prev.has(activeTab)) return prev;
+        return new Set(prev).add(activeTab);
+      });
+    }
+  }, [isOpen, activeTab]);
+
+  // Reset visited tabs on close (transition from open → closed only)
+  useEffect(() => {
+    if (prevOpen.current && !isOpen) {
+      setVisitedTabs(new Set());
+    }
+    prevOpen.current = isOpen;
+  }, [isOpen]);
+
   // Close on Escape
   useEffect(() => {
     if (!isOpen) return;
@@ -71,6 +99,42 @@ export function ContextDrawer({
     return () => { document.body.style.overflow = ""; };
   }, [isOpen]);
 
+  // --- Drag-to-dismiss for mobile bottom sheet ---
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const dragState = useRef<{ startY: number; startTranslate: number } | null>(null);
+  const [dragOffset, setDragOffset] = useState(0);
+  const isDragging = dragOffset > 0;
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    // Only enable on mobile (the drag handle area, or sheet header)
+    const touch = e.touches[0];
+    dragState.current = { startY: touch.clientY, startTranslate: 0 };
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!dragState.current) return;
+    const touch = e.touches[0];
+    const dy = touch.clientY - dragState.current.startY;
+    // Only allow dragging down, not up
+    if (dy > 0) {
+      setDragOffset(dy);
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    if (!dragState.current || !sheetRef.current) {
+      dragState.current = null;
+      setDragOffset(0);
+      return;
+    }
+    const sheetHeight = sheetRef.current.offsetHeight;
+    if (dragOffset > sheetHeight * DRAG_DISMISS_THRESHOLD) {
+      onClose();
+    }
+    dragState.current = null;
+    setDragOffset(0);
+  }, [dragOffset, onClose]);
+
   return (
     <>
       {/* Mobile backdrop */}
@@ -84,26 +148,39 @@ export function ContextDrawer({
 
       {/* Drawer panel — right slide on desktop, bottom sheet on mobile */}
       <div
+        ref={sheetRef}
         role="complementary"
         aria-label="Dashboard panels"
-        className={`fixed z-20 flex flex-col bg-white shadow-2xl transition-transform duration-300 ease-out
+        className={`fixed z-20 flex flex-col bg-white shadow-2xl
           /* Mobile: bottom sheet */
           inset-x-0 bottom-0 max-h-[80vh] rounded-t-2xl
           /* Desktop: right panel */
           md:inset-x-auto md:top-12 md:right-0 md:bottom-0 md:max-h-none md:w-[480px] md:rounded-none
+          ${isDragging ? "" : "transition-transform duration-300 ease-out"}
           ${isOpen
             ? "translate-y-0 md:translate-x-0 md:translate-y-0"
             : "translate-y-full md:translate-x-full md:translate-y-0"
           }
         `}
+        style={isDragging ? { transform: `translateY(${dragOffset}px)` } : undefined}
       >
-        {/* Mobile drag handle */}
-        <div className="flex justify-center py-2 md:hidden">
+        {/* Mobile drag handle — touch target for drag-to-dismiss */}
+        <div
+          className="flex justify-center py-2 md:hidden"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
           <div className="h-1 w-10 rounded-full bg-gray-300" />
         </div>
 
         {/* Header with tabs + close button */}
-        <div className="flex items-center border-b border-gray-200">
+        <div
+          className="flex items-center border-b border-gray-200"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
           <div className="flex flex-1 overflow-x-auto">
             {TABS.map((tab) => (
               <button
@@ -131,54 +208,34 @@ export function ContextDrawer({
           </button>
         </div>
 
-        {/* Tab content — scrollable */}
+        {/* Tab content — lazy-mounted, hidden when not active but kept alive */}
         <div className="flex-1 overflow-y-auto">
-          {activeTab === "briefing" && (
-            <div className="p-4">
-              {currentBrief ? (
-                <SituationBriefing
-                  paragraph={currentBrief.paragraph}
-                  sections={currentBrief.sections}
-                  refreshedAt={currentBrief.refreshed_at}
-                  confidence={currentBrief.confidence}
-                  sourceCount={currentBrief.coverage.sources_included.length}
-                />
-              ) : (
-                <p className="py-8 text-center text-sm text-[var(--text-secondary)]">
-                  No briefing available yet.
-                </p>
-              )}
-            </div>
-          )}
-
-          {activeTab === "flights" && (
-            <FlightDetailProvider>
-              <div className="space-y-4 p-4">
-                <AirspacePulseAtlas />
-                <FlightPulseWithDetail byAirport={pulse.byAirport} topRoutes={pulse.topRoutes} />
+          <Suspense fallback={<TabLoader />}>
+            {visitedTabs.has("briefing") && (
+              <div className={activeTab === "briefing" ? "" : "hidden"}>
+                <BriefingTab currentBrief={currentBrief} />
               </div>
-            </FlightDetailProvider>
-          )}
-
-          {activeTab === "feed" && (
-            <div className="space-y-4 p-4">
-              <CrisisPanel />
-              <UpdatesFeed initialItems={initialUpdates} />
-            </div>
-          )}
-
-          {activeTab === "resources" && (
-            <div className="space-y-4 p-4">
-              <ExpertAnalysisPanel />
-              <ResourcesPanel />
-              <MyTrackingPanel />
-              <SourceHealth
-                totalSources={totalSources}
-                healthySources={healthySources}
-                suppressedSources={suppressedSources}
-              />
-            </div>
-          )}
+            )}
+            {visitedTabs.has("flights") && (
+              <div className={activeTab === "flights" ? "" : "hidden"}>
+                <FlightsTab pulse={pulse} />
+              </div>
+            )}
+            {visitedTabs.has("feed") && (
+              <div className={activeTab === "feed" ? "" : "hidden"}>
+                <FeedTab initialUpdates={initialUpdates} />
+              </div>
+            )}
+            {visitedTabs.has("resources") && (
+              <div className={activeTab === "resources" ? "" : "hidden"}>
+                <ResourcesTab
+                  totalSources={totalSources}
+                  healthySources={healthySources}
+                  suppressedSources={suppressedSources}
+                />
+              </div>
+            )}
+          </Suspense>
         </div>
       </div>
     </>

@@ -127,7 +127,16 @@ function buildFallbackSections(context: BriefInputContext): BriefSections {
     : "No active security advisories detected from monitored government and military sources.";
 
   const flights = context.flight.total > 0
-    ? `${context.flight.total} flights tracked in the last 45 minutes. ${context.flight.delayed} delayed, ${context.flight.cancelled} cancelled.${context.flight.stale ? " Flight telemetry is stale; verify with airline directly." : ""}`
+    ? (() => {
+        const parts = [`${context.flight.total} flights tracked in the last 45 minutes.`];
+        if (context.flight.delayed > 0 || context.flight.cancelled > 0) {
+          const d = context.flight.delayed > 0 ? `${context.flight.delayed} delayed` : "";
+          const c = context.flight.cancelled > 0 ? `${context.flight.cancelled} cancelled` : "";
+          parts.push([d, c].filter(Boolean).join(", ") + ".");
+        }
+        if (context.flight.stale) parts.push("Flight telemetry is stale; verify with airline directly.");
+        return parts.join(" ");
+      })()
     : "Commercial flight telemetry is currently unavailable.";
 
   const guidance = context.freshness_state === "stale"

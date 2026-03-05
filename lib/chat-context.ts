@@ -105,7 +105,10 @@ export async function buildSituationContext(): Promise<string> {
       parts.push("=== CURRENT INTELLIGENCE BRIEF ===");
       parts.push(`Executive Summary: ${brief.paragraph}`);
       parts.push(`Confidence: ${brief.confidence} | Freshness: ${brief.freshness_state}`);
-      parts.push(`Flights: ${brief.flight.total} tracked, ${brief.flight.delayed} delayed, ${brief.flight.cancelled} cancelled`);
+      const flightParts = [`${brief.flight.total} tracked`];
+      if (brief.flight.delayed > 0) flightParts.push(`${brief.flight.delayed} delayed`);
+      if (brief.flight.cancelled > 0) flightParts.push(`${brief.flight.cancelled} cancelled`);
+      parts.push(`Flights: ${flightParts.join(", ")}`);
       if (brief.sections) {
         if (brief.sections.security) parts.push(`Security: ${brief.sections.security}`);
         if (brief.sections.flights) parts.push(`Airspace & Flights: ${brief.sections.flights}`);
@@ -220,9 +223,11 @@ export async function buildSituationContext(): Promise<string> {
         const delayed = Number(row.delayed ?? 0);
         const cancelled = Number(row.cancelled ?? 0);
         const avgDelay = row.avg_delay_minutes != null ? Math.round(Number(row.avg_delay_minutes)) : null;
-        parts.push(
-          `[${airport} ${boardType}s] ${total} flights: ${delayed} delayed, ${cancelled} cancelled${avgDelay ? `, avg delay ${avgDelay}min` : ""}`,
-        );
+        const statParts = [`${total} flights`];
+        if (delayed > 0) statParts.push(`${delayed} delayed`);
+        if (cancelled > 0) statParts.push(`${cancelled} cancelled`);
+        if (avgDelay) statParts.push(`avg delay ${avgDelay}min`);
+        parts.push(`[${airport} ${boardType}s] ${statParts.join(", ")}`);
       }
     }
   } catch {
@@ -371,7 +376,10 @@ export async function buildRouteIntelligence(intent: FlightIntent): Promise<stri
     if (flightData && flightData.length > 0) {
       const delayed = flightData.filter((f) => f.is_delayed).length;
       const cancelled = flightData.filter((f) => /cancel/i.test(f.status)).length;
-      parts.push(`\nRecent flights: ${flightData.length} observed, ${delayed} delayed, ${cancelled} cancelled`);
+      const fParts = [`${flightData.length} observed`];
+      if (delayed > 0) fParts.push(`${delayed} delayed`);
+      if (cancelled > 0) fParts.push(`${cancelled} cancelled`);
+      parts.push(`\nRecent flights: ${fParts.join(", ")}`);
       for (const f of flightData.slice(0, 8)) {
         parts.push(`  [${f.flight_number}] ${f.origin_iata}→${f.destination_iata} status=${f.status} delayed=${f.is_delayed ? "yes" : "no"} delay=${f.delay_minutes ?? "n/a"}min sched=${f.scheduled_time ?? "n/a"}`);
       }

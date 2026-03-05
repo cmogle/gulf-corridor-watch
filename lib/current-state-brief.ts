@@ -597,7 +597,7 @@ function buildPostureSentence(context: BriefInputContext, posture: "normal" | "h
     context.flight.total > 0
       ? disruptionParts.length > 0
         ? `Commercial traffic sample shows ${context.flight.total} tracked flights in the last 45 minutes (${disruptionParts.join(", ")}).`
-        : `Commercial traffic sample shows ${context.flight.total} tracked flights in the last 45 minutes with no delays or cancellations.`
+        : `Commercial traffic sample shows ${context.flight.total} tracked flights in the last 45 minutes.`
       : "Commercial traffic visibility is currently limited.";
   return `As of ${formatDubaiTime(context.computed_at)}, UAE airspace posture appears ${postureText}. ${flightSentence}`;
 }

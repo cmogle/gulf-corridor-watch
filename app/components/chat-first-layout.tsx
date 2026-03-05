@@ -100,30 +100,20 @@ export function ChatFirstLayout({
 
       {/* Main content area below fixed status bar */}
       <div className="flex flex-1 overflow-hidden pt-12">
-        {/* Chat area */}
+        {/* Homepage — always rendered */}
         <div
           className="flex flex-1 flex-col overflow-hidden"
           onClick={isDrawerOpen ? handleCloseDrawer : undefined}
         >
-          {!hasStartedChat ? (
-            <ChatHome
-              posture={posture}
-              briefingSummary={briefingSummary}
-              sourceCount={sourceCount}
-              updatedAt={updatedAt}
-              suggestedPrompts={suggestedPrompts}
-              onPromptClick={handlePromptClick}
-              onOpenBriefing={handleOpenBriefing}
-            />
-          ) : (
-            <ChatPanel
-              variant="fullscreen"
-              suggestedPrompts={suggestedPrompts}
-              initialPrompt={pendingPrompt}
-              onFirstMessage={handleFirstMessage}
-              onBackToHome={handleBackToHome}
-            />
-          )}
+          <ChatHome
+            posture={posture}
+            briefingSummary={briefingSummary}
+            sourceCount={sourceCount}
+            updatedAt={updatedAt}
+            suggestedPrompts={suggestedPrompts}
+            onPromptClick={handlePromptClick}
+            onOpenBriefing={handleOpenBriefing}
+          />
         </div>
 
         {/* Context drawer */}
@@ -140,6 +130,35 @@ export function ChatFirstLayout({
           suppressedSources={suppressedSources}
         />
       </div>
+
+      {/* Chat overlay — slides up over homepage, status bar stays accessible */}
+      {hasStartedChat && (
+        <div className="chat-overlay fixed inset-x-0 bottom-0 top-12 z-20 flex flex-col bg-[var(--surface-light)] shadow-[0_-4px_20px_rgba(0,0,0,0.08)] md:rounded-t-xl">
+          {/* Overlay header */}
+          <div className="flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2 md:rounded-t-xl">
+            <button
+              onClick={handleBackToHome}
+              className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-[var(--text-secondary)] transition-colors hover:bg-gray-100 hover:text-[var(--text-primary)]"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="10 12 5 8 10 4" />
+              </svg>
+              Home
+            </button>
+            <span className="text-xs font-medium text-[var(--text-secondary)]">Chat</span>
+            <div className="w-16" />
+          </div>
+
+          {/* Chat panel fills remaining space */}
+          <ChatPanel
+            variant="fullscreen"
+            suggestedPrompts={suggestedPrompts}
+            initialPrompt={pendingPrompt}
+            onFirstMessage={handleFirstMessage}
+            onBackToHome={handleBackToHome}
+          />
+        </div>
+      )}
     </div>
   );
 }

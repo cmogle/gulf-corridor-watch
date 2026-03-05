@@ -292,21 +292,9 @@ export function ChatPanel({ suggestedPrompts = [], variant = "hero", initialProm
                   : "Ask anything — flights, routes, safety, advisories..."
               }
               disabled={limitReached && !isAuthenticated}
-              className={`w-full rounded-xl border-0 bg-white px-4 py-3.5 pr-24 text-[15px] text-[var(--text-primary)] shadow-lg outline-none ring-2 ring-transparent placeholder:text-[var(--text-secondary)] focus:ring-[var(--primary-blue)] disabled:opacity-50 ${onBackToHome ? "pl-11" : ""}`}
+              className="w-full rounded-xl border-0 bg-white px-4 py-3.5 pr-24 text-[15px] text-[var(--text-primary)] shadow-lg outline-none ring-2 ring-transparent placeholder:text-[var(--text-secondary)] focus:ring-[var(--primary-blue)] disabled:opacity-50"
               aria-label="Chat message input"
             />
-            {onBackToHome && (
-              <button
-                onClick={onBackToHome}
-                className="absolute left-3 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-lg p-1 text-[var(--text-secondary)] transition-colors hover:bg-gray-100 hover:text-[var(--text-primary)]"
-                title="Back to home"
-                aria-label="Back to home"
-              >
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="11 14 6 9 11 4" />
-                </svg>
-              </button>
-            )}
             <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1.5">
               {hasMessages && (
                 <button

@@ -86,6 +86,16 @@
   animation: atlas-ribbon-flow 1.8s linear infinite;
 }
 
+/* ── Chat overlay slide-up ───────────────────────────── */
+@keyframes slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.chat-overlay {
+  animation: slide-up 0.25s ease-out forwards;
+}
+
 /* ── Chat markdown prose ──────────────────────────────── */
 .chat-prose {
   line-height: 1.6;

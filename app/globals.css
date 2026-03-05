@@ -85,3 +85,136 @@
 .animate-atlas-ribbon-flow {
   animation: atlas-ribbon-flow 1.8s linear infinite;
 }
+
+/* ── Chat markdown prose ──────────────────────────────── */
+.chat-prose {
+  line-height: 1.6;
+}
+
+.chat-prose h2 {
+  font-size: 1.05em;
+  font-weight: 700;
+  margin-top: 1em;
+  margin-bottom: 0.4em;
+  line-height: 1.3;
+}
+
+.chat-prose h3 {
+  font-size: 0.95em;
+  font-weight: 700;
+  margin-top: 0.9em;
+  margin-bottom: 0.3em;
+  line-height: 1.3;
+}
+
+.chat-prose h2:first-child,
+.chat-prose h3:first-child {
+  margin-top: 0;
+}
+
+.chat-prose p {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.chat-prose p:first-child {
+  margin-top: 0;
+}
+
+.chat-prose p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-prose strong {
+  font-weight: 650;
+}
+
+.chat-prose hr {
+  border: none;
+  border-top: 1px solid var(--border-light);
+  margin: 0.75em 0;
+}
+
+.chat-prose ul,
+.chat-prose ol {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+
+.chat-prose ul {
+  list-style: disc;
+}
+
+.chat-prose ol {
+  list-style: decimal;
+}
+
+.chat-prose li {
+  margin: 0.2em 0;
+}
+
+.chat-prose li > p {
+  margin: 0;
+}
+
+.chat-prose blockquote {
+  border-left: 3px solid var(--amber);
+  padding-left: 0.75em;
+  margin: 0.6em 0;
+  color: var(--text-secondary);
+}
+
+.chat-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: #F3F4F6;
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+}
+
+.chat-prose pre {
+  background: #F3F4F6;
+  padding: 0.75em;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+
+.chat-prose pre code {
+  background: none;
+  padding: 0;
+}
+
+.chat-prose a {
+  color: var(--primary-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.chat-prose a:hover {
+  text-decoration-thickness: 2px;
+}
+
+/* GFM tables */
+.chat-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.9em;
+}
+
+.chat-prose th {
+  text-align: left;
+  font-weight: 650;
+  padding: 0.35em 0.6em;
+  border-bottom: 2px solid var(--border-light);
+}
+
+.chat-prose td {
+  padding: 0.3em 0.6em;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.chat-prose tr:last-child td {
+  border-bottom: none;
+}

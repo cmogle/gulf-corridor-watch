@@ -1,6 +1,8 @@
 "use client";
 
 import { memo } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 export type ChatMessageData = {
   id: string;
@@ -20,20 +22,6 @@ function formatTime(iso?: string): string {
   } catch {
     return "";
   }
-}
-
-/**
- * Renders markdown-lite content: bold, inline code, links, line breaks.
- * Full markdown parsing would require a dependency; this covers the essentials.
- */
-function renderContent(text: string) {
-  // Split by newlines, render each line
-  return text.split("\n").map((line, i) => (
-    <span key={i}>
-      {i > 0 && <br />}
-      {line}
-    </span>
-  ));
 }
 
 function TypingIndicator() {
@@ -61,7 +49,7 @@ export const ChatMessage = memo(function ChatMessage({
       <div className="flex justify-end">
         <div className="max-w-[85%] md:max-w-[70%]">
           <div className="rounded-2xl rounded-br-md bg-[var(--surface-dark)] px-4 py-2.5 text-[14px] leading-relaxed text-white">
-            {renderContent(message.content)}
+            {message.content}
           </div>
           {time && (
             <p className="mt-0.5 text-right text-[11px] text-[var(--text-secondary)]">{time}</p>
@@ -78,7 +66,11 @@ export const ChatMessage = memo(function ChatMessage({
           {isStreaming && !message.content ? (
             <TypingIndicator />
           ) : (
-            <div className="whitespace-pre-wrap">{renderContent(message.content)}</div>
+            <div className="chat-prose">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {message.content}
+              </ReactMarkdown>
+            </div>
           )}
         </div>
         {time && (

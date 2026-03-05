@@ -9,6 +9,7 @@ type ChatHomeProps = {
   updatedAt: string | null;
   suggestedPrompts: string[];
   onPromptClick: (prompt: string) => void;
+  onOpenBriefing?: () => void;
 };
 
 const DEFAULT_PROMPTS = [
@@ -48,6 +49,13 @@ function relativeTime(iso: string | null): string {
   return `${hours} hours ago`;
 }
 
+/** Truncate to the first N sentences, with ellipsis if truncated */
+function truncateSentences(text: string, max: number): { text: string; truncated: boolean } {
+  const sentences = text.match(/[^.!?]+[.!?]+/g) ?? [text];
+  if (sentences.length <= max) return { text: text.trim(), truncated: false };
+  return { text: sentences.slice(0, max).join(" ").trim(), truncated: true };
+}
+
 export function ChatHome({
   posture,
   briefingSummary,
@@ -55,10 +63,13 @@ export function ChatHome({
   updatedAt,
   suggestedPrompts,
   onPromptClick,
+  onOpenBriefing,
 }: ChatHomeProps) {
   const prompts = suggestedPrompts.length > 0
     ? [...new Set([...suggestedPrompts, ...DEFAULT_PROMPTS])].slice(0, 6)
     : DEFAULT_PROMPTS;
+
+  const brief = truncateSentences(briefingSummary, 3);
 
   return (
     <div className="flex flex-1 items-center justify-center px-4 py-8">
@@ -72,7 +83,18 @@ export function ChatHome({
             </h1>
           </div>
           <p className="mx-auto max-w-lg text-[15px] leading-relaxed text-[var(--text-secondary)]">
-            {briefingSummary}
+            {brief.text}
+            {brief.truncated && onOpenBriefing && (
+              <>
+                {" "}
+                <button
+                  onClick={onOpenBriefing}
+                  className="inline text-[var(--primary-blue)] hover:underline"
+                >
+                  Full briefing &rarr;
+                </button>
+              </>
+            )}
           </p>
         </div>
 

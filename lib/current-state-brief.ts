@@ -69,13 +69,28 @@ const REGIONAL_RELEVANCE_KEYWORDS = [
   "red sea",
   "strait of hormuz",
 ];
+/** Narrow UAE-specific terms — content must reference these to be included from non-government sources */
+const UAE_SPECIFIC_KEYWORDS = [
+  "uae",
+  "united arab emirates",
+  "dubai",
+  "abu dhabi",
+  "dxb",
+  "auh",
+  "dwc",
+  "shj",
+  "sharjah",
+  "al maktoum",
+  "jebel ali",
+];
+/** Sources whose content is inherently UAE-specific (government, local infrastructure) */
 const ALWAYS_RELEVANT_SOURCE_IDS = new Set([
   "uae_mofa",
   "visit_dubai_news",
-  "emirates_updates",
-  "etihad_advisory",
-  "oman_air",
   "rta_dubai",
+  "dubai_airports",
+  "abu_dhabi_airports",
+  "gcaa",
 ]);
 
 export type BriefFreshnessState = "fresh" | "mixed" | "stale";
@@ -382,11 +397,31 @@ function keywordHitCount(text: string, keywords: string[]): number {
   return hits;
 }
 
+/**
+ * Determines if evidence text is relevant to the UAE airspace/travel briefing.
+ * Three tiers:
+ *  1. Always-relevant sources (UAE government/infrastructure) — auto-pass
+ *  2. Content mentioning UAE specifically — needs 1+ security or regional keyword
+ *  3. Content without UAE mention — needs security keyword + crisis-region keyword
+ *     (not just any GCC country, to filter out e.g. "Oman Air moves terminal at Riyadh")
+ */
+const CRISIS_REGION_KEYWORDS = [
+  "gulf", "middle east", "iran", "iraq", "israel", "gaza", "lebanon",
+  "yemen", "syria", "red sea", "strait of hormuz",
+];
 function isRegionallyRelevantEvidence(text: string, sourceId: string): boolean {
   if (ALWAYS_RELEVANT_SOURCE_IDS.has(sourceId) || sourceId.startsWith("flightradar_")) return true;
+  const uaeHits = keywordHitCount(text, UAE_SPECIFIC_KEYWORDS);
+  // Content that directly references UAE — low bar (any security or regional keyword)
+  if (uaeHits > 0) {
+    const securityHits = keywordHitCount(text, SECURITY_RELEVANCE_KEYWORDS);
+    const regionalHits = keywordHitCount(text, REGIONAL_RELEVANCE_KEYWORDS);
+    return securityHits > 0 || regionalHits > 0;
+  }
+  // Content without UAE mention — high bar: must reference a crisis region, not just a GCC neighbor
   const securityHits = keywordHitCount(text, SECURITY_RELEVANCE_KEYWORDS);
-  const regionalHits = keywordHitCount(text, REGIONAL_RELEVANCE_KEYWORDS);
-  return securityHits > 0 && regionalHits > 0;
+  const crisisHits = keywordHitCount(text, CRISIS_REGION_KEYWORDS);
+  return securityHits > 0 && crisisHits > 0;
 }
 
 function escapeRegExp(text: string): string {
@@ -562,39 +597,37 @@ function buildPostureSentence(context: BriefInputContext, posture: "normal" | "h
   return `As of ${formatDubaiTime(context.computed_at)}, UAE airspace posture appears ${postureText}. ${flightSentence}`;
 }
 
-function buildConfirmedSentence(rows: NarrativeEvidenceRow[], socialRows: CorroboratedSocialRow[]): string {
+/** Build a natural-language sentence summarising confirmed evidence rows */
+function buildSignalsSentence(rows: NarrativeEvidenceRow[], socialRows: CorroboratedSocialRow[]): string {
   if (rows.length === 0 && socialRows.length === 0) {
-    return "Confirmed official signals: no clear official notices of missile, drone, or military-aircraft incidents were found in current ingested sources.";
+    return "No confirmed disruptions or security incidents found in current sources.";
   }
-  const sourcePart = rows.map((row) => `[${row.confidence_label}] ${row.source_name}: ${row.clause}`).join("; ");
-  const socialPart =
-    socialRows.length > 0
-      ? ` Corroborated official X signals: ${socialRows.map((row) => `@${row.handle}: ${row.text}`).join("; ")}.`
-      : "";
-  return `Confirmed official signals: ${sourcePart}.${socialPart}`;
+  // Present evidence as readable clauses without [label] Source: prefix
+  const clauses = rows.map((row) => row.clause).filter(Boolean);
+  const socialClauses = socialRows.map((row) => row.text).filter(Boolean);
+  const all = [...clauses, ...socialClauses];
+  if (all.length === 1) return all[0].replace(/\.?$/, ".");
+  if (all.length <= 3) return all.join(". ").replace(/\.?\.\s*/g, ". ").replace(/\.?$/, ".");
+  // More than 3: take the top 3 most relevant, note the rest
+  return all.slice(0, 3).join(". ").replace(/\.?\.\s*/g, ". ").replace(/\.?$/, ".");
 }
 
-function buildUnknownsSentence(context: BriefInputContext): string {
+function buildGapsSentence(context: BriefInputContext): string {
   const parts: string[] = [];
-  if (context.coverage.stale_sources.length > 0) parts.push("some source feeds are not fresh");
-  if (context.flight.stale) parts.push("commercial flight telemetry is stale");
-  if (parts.length === 0) return "Unknowns: no major unresolved data gaps are currently flagged.";
-  return `Unknowns: ${parts.join(" and ")}.`;
+  if (context.coverage.stale_sources.length > 0) parts.push("some official sources have not updated recently");
+  if (context.flight.stale) parts.push("flight telemetry is stale");
+  if (parts.length === 0) return "";
+  return parts.join(" and ").replace(/^./, (c) => c.toUpperCase()) + " — verify official channels directly.";
 }
 
-function buildImplicationSentence(posture: "normal" | "heightened" | "unclear"): string {
+function buildGuidanceSentence(posture: "normal" | "heightened" | "unclear"): string {
   if (posture === "heightened") {
-    return "Practical implication for UAE residents: expect possible short-notice routing or schedule changes and monitor official channels closely.";
+    return "Expect possible short-notice schedule changes; monitor airline and government channels.";
   }
   if (posture === "normal") {
-    return "Practical implication for UAE residents: no broad disruption signal is currently confirmed; continue normal plans while monitoring official channels.";
+    return "No broad disruption signal confirmed. Continue normal plans.";
   }
-  return "Practical implication for UAE residents: conditions are uncertain right now, so rely on official UAE channels for immediate guidance.";
-}
-
-function buildFreshnessCaveat(shouldInclude: boolean): string {
-  if (!shouldInclude) return "";
-  return "Some official pages have not updated recently; verify source links directly for the latest notice.";
+  return "Conditions are uncertain. Rely on official UAE channels for immediate guidance.";
 }
 
 export function isNarrativePolicyCompliant(paragraph: string, opts: { allowXMention: boolean }): boolean {
@@ -615,14 +648,11 @@ export function buildFallbackBriefParagraph(context: BriefInputContext): string 
   const basis = buildNarrativeBasis(context);
   const posture = deriveAirspacePosture(context, basis);
   const postureSentence = buildPostureSentence(context, posture);
-  const confirmedSentence = buildConfirmedSentence(basis.source_evidence_rows, basis.corroborated_social_rows);
-  const unknownsSentence = buildUnknownsSentence(context);
-  const implicationSentence = buildImplicationSentence(posture);
-  const freshnessCaveat = buildFreshnessCaveat(basis.freshness_caveat_required);
-  return compact(
-    `${postureSentence} ${confirmedSentence} ${unknownsSentence} ${implicationSentence} ${freshnessCaveat}`,
-    1200,
-  );
+  const signals = buildSignalsSentence(basis.source_evidence_rows, basis.corroborated_social_rows);
+  const gaps = buildGapsSentence(context);
+  const guidance = buildGuidanceSentence(posture);
+  const parts = [postureSentence, signals, gaps, guidance].filter(Boolean);
+  return compact(parts.join(" "), 800);
 }
 
 function normalizeFlightSummary(value: unknown): CurrentStateBrief["flight"] {

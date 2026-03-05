@@ -44,15 +44,14 @@ type FlightRow = {
 function buildFlightPromptSuggestions(pulse: FlightPulseData): string[] {
   if (!pulse.latestFetch || pulse.topRoutes.length === 0) return [];
 
+  // Only use routes with valid IATA codes on both ends
+  const validRoutes = pulse.topRoutes.filter((item) => /^[A-Z]{3} -> [A-Z]{3}$/.test(item.route));
+
   const prompts: string[] = [];
-  for (const item of pulse.topRoutes.slice(0, 3)) {
+  for (const item of validRoutes.slice(0, 3)) {
+    const [origin, destination] = item.route.split(" -> ");
     prompts.push(`${item.route} delayed now`);
-    const routeMatch = item.route.match(/^([A-Z]{3}) -> ([A-Z]{3})$/);
-    if (routeMatch) {
-      const origin = routeMatch[1];
-      const destination = routeMatch[2];
-      prompts.push(`What is the likelihood of getting from ${origin} to ${destination} in the next 24 hours?`);
-    }
+    prompts.push(`What is the likelihood of getting from ${origin} to ${destination} in the next 24 hours?`);
   }
 
   return Array.from(new Set(prompts)).slice(0, 4);

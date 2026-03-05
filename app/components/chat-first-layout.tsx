@@ -75,6 +75,11 @@ export function ChatFirstLayout({
     setHasStartedChat(true);
   }, []);
 
+  const handleOpenBriefing = useCallback(() => {
+    setActiveTab("briefing");
+    setIsDrawerOpen(true);
+  }, []);
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[var(--surface-light)]">
       <StatusBar
@@ -103,6 +108,7 @@ export function ChatFirstLayout({
               updatedAt={updatedAt}
               suggestedPrompts={suggestedPrompts}
               onPromptClick={handlePromptClick}
+              onOpenBriefing={handleOpenBriefing}
             />
           ) : (
             <ChatPanel

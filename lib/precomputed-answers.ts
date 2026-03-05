@@ -9,7 +9,7 @@
  */
 
 import { getSupabaseAdmin } from "./supabase";
-import { generateText, hasAnthropicKey, extractClaudeUsage } from "./anthropic";
+import { generateText, hasAnthropicKey, extractClaudeUsage, type SystemBlock } from "./anthropic";
 import { logLlmTelemetry } from "./llm-telemetry";
 import { CHAT_SYSTEM_PROMPT } from "./chat-context";
 
@@ -124,14 +124,18 @@ export async function refreshPrecomputedAnswers(
     const results = await Promise.allSettled(
       batch.map(async (intent) => {
         const question = INTENT_QUESTIONS[intent];
+        // System blocks: prompt + context combined exceeds 1024-token caching minimum
+        const systemBlocks: SystemBlock[] = [
+          { type: "text", text: CHAT_SYSTEM_PROMPT },
+          { type: "text", text: situationContext, cache_control: { type: "ephemeral" } },
+        ];
         const result = await generateText({
           model: "claude-sonnet-4-6",
           temperature: 0.1,
           maxTokens: 1024,
           timeoutMs: 15_000,
-          cacheSystem: true,
-          system: CHAT_SYSTEM_PROMPT,
-          userMessage: `${situationContext}\n\nQuestion: ${question}`,
+          system: systemBlocks,
+          userMessage: `Question: ${question}`,
         });
 
         const usage = extractClaudeUsage(result);

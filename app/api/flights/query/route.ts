@@ -2,6 +2,7 @@ import { runFlightQuery } from "@/lib/flight-query";
 import { generateText, hasAnthropicKey } from "@/lib/anthropic";
 import { checkRateLimit, getClientIp, getChatRateLimitConfig } from "@/lib/rate-limit";
 import { checkTokenBudget, recordTokenUsage } from "@/lib/token-budget";
+import { checkOrigin } from "@/lib/origin-guard";
 
 function normalizedIntent(intent: Awaited<ReturnType<typeof runFlightQuery>>["intent"]) {
   if (intent.type === "flight_number") {
@@ -21,6 +22,11 @@ function normalizedIntent(intent: Awaited<ReturnType<typeof runFlightQuery>>["in
 
 export async function POST(req: Request) {
   try {
+    // Origin check — block requests not from our domains
+    if (!checkOrigin(req)) {
+      return Response.json({ ok: false, error: "Forbidden" }, { status: 403 });
+    }
+
     const body = await req.json();
     const query = String(body?.query ?? "").trim();
     const mode = body?.mode === "explain" ? "explain" : "structured_only";
@@ -34,7 +40,7 @@ export async function POST(req: Request) {
 
     // Rate limit and budget check for LLM "explain" mode
     const clientIp = getClientIp(req);
-    const rateCheck = checkRateLimit(clientIp, getChatRateLimitConfig());
+    const rateCheck = await checkRateLimit(clientIp, getChatRateLimitConfig());
     if (!rateCheck.allowed) {
       return Response.json(
         { ok: true, mode, normalized_intent: normalizedIntent(result.intent), ...result, explanation: "Rate limited. Please try again later." },

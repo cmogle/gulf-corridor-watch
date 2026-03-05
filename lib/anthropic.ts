@@ -18,15 +18,18 @@ export function hasAnthropicKey(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
+export type SystemBlock = { type: "text"; text: string; cache_control?: { type: "ephemeral" } };
+
 export type GenerateTextOptions = {
-  system: string;
+  /** System prompt — string or pre-built content blocks (with cache_control). */
+  system: string | SystemBlock[];
   userMessage: string;
   model?: string;
   temperature?: number;
   maxTokens?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
-  /** Enable prompt caching on the system prompt (requires >=2048 tokens for Sonnet) */
+  /** Enable prompt caching on the system prompt (requires >=1024 tokens for Sonnet) */
   cacheSystem?: boolean;
 };
 
@@ -49,10 +52,16 @@ export async function generateText(opts: GenerateTextOptions): Promise<GenerateT
   const model = opts.model ?? process.env.CURRENT_STATE_BRIEF_MODEL?.trim() ?? DEFAULT_MODEL;
   const maxTokens = opts.maxTokens ?? 1024;
 
-  // Use cached content block format when cacheSystem is enabled
-  const systemParam: string | Anthropic.Messages.TextBlockParam[] = opts.cacheSystem
-    ? [{ type: "text" as const, text: opts.system, cache_control: { type: "ephemeral" as const } }]
-    : opts.system;
+  // Build system parameter: if caller passed pre-built blocks, use them directly.
+  // Otherwise wrap in a cache_control block when cacheSystem is enabled.
+  let systemParam: string | Anthropic.Messages.TextBlockParam[];
+  if (Array.isArray(opts.system)) {
+    systemParam = opts.system as Anthropic.Messages.TextBlockParam[];
+  } else if (opts.cacheSystem) {
+    systemParam = [{ type: "text" as const, text: opts.system, cache_control: { type: "ephemeral" as const } }];
+  } else {
+    systemParam = opts.system;
+  }
 
   const response = await client.messages.create(
     {
@@ -97,7 +106,8 @@ export type StreamTextMessage = {
 };
 
 export type StreamTextOptions = {
-  system: string;
+  /** System prompt — string or pre-built content blocks (with cache_control). */
+  system: string | SystemBlock[];
   messages: Array<StreamTextMessage>;
   model?: string;
   temperature?: number;
@@ -133,10 +143,15 @@ export function streamText(opts: StreamTextOptions): {
     resolveResponse = resolve;
   });
 
-  // Use cached content block format when cacheSystem is enabled
-  const systemParam: string | Anthropic.Messages.TextBlockParam[] = opts.cacheSystem
-    ? [{ type: "text" as const, text: opts.system, cache_control: { type: "ephemeral" as const } }]
-    : opts.system;
+  // Build system parameter: pre-built blocks used directly, else wrap when caching.
+  let systemParam: string | Anthropic.Messages.TextBlockParam[];
+  if (Array.isArray(opts.system)) {
+    systemParam = opts.system as Anthropic.Messages.TextBlockParam[];
+  } else if (opts.cacheSystem) {
+    systemParam = [{ type: "text" as const, text: opts.system, cache_control: { type: "ephemeral" as const } }];
+  } else {
+    systemParam = opts.system;
+  }
 
   const encoder = new TextEncoder();
   let fullText = "";

@@ -72,7 +72,7 @@ function buildSkipped(reason: string): ValidationMetadata {
 export function getUpdateValidationConfig(): ValidationConfig {
   return {
     enabled: parseBool(process.env.LLM_UPDATE_VALIDATION_ENABLED ?? process.env.GPT_UPDATE_VALIDATION_ENABLED, true),
-    model: process.env.LLM_UPDATE_VALIDATION_MODEL?.trim() || process.env.GPT_UPDATE_VALIDATION_MODEL?.trim() || "claude-sonnet-4-6",
+    model: process.env.LLM_UPDATE_VALIDATION_MODEL?.trim() || process.env.GPT_UPDATE_VALIDATION_MODEL?.trim() || "claude-haiku-4-5-20251001",
     timeoutMs: parsePositiveInt(process.env.LLM_UPDATE_VALIDATION_TIMEOUT_MS ?? process.env.GPT_UPDATE_VALIDATION_TIMEOUT_MS, 8000),
   };
 }

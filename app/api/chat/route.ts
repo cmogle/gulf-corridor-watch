@@ -1,4 +1,4 @@
-import { generateText, streamText, hasAnthropicKey, extractClaudeUsage, type StreamTextMessage } from "@/lib/anthropic";
+import { generateText, streamText, hasAnthropicKey, extractClaudeUsage, type StreamTextMessage, type SystemBlock } from "@/lib/anthropic";
 import { airportDataToContext, flightsToContextRows, parseFlightIntent, runFlightQuery } from "@/lib/flight-query";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { logLlmTelemetry } from "@/lib/llm-telemetry";
@@ -13,23 +13,21 @@ import {
   storeChatMessage,
 } from "@/lib/chat-context";
 import { classifyIntent, lookupPrecomputedAnswer } from "@/lib/precomputed-answers";
-import { checkRateLimit, getClientIp, getChatRateLimitConfig } from "@/lib/rate-limit";
+import { checkRateLimit, getClientIp, getChatRateLimitConfig, getAnonDailyLimitConfig } from "@/lib/rate-limit";
 import { checkTokenBudget, recordTokenUsage } from "@/lib/token-budget";
+import { checkOrigin } from "@/lib/origin-guard";
 
 const CHAT_MODEL = "claude-sonnet-4-6";
 const CHAT_MAX_OUTPUT_TOKENS = 1024;
-const ANON_RATE_LIMIT = 5;
-const ANON_COOKIE_NAME = "gcw_anon_chat_count";
-
-function getAnonCount(req: Request): number {
-  const cookie = req.headers.get("cookie") ?? "";
-  const match = cookie.match(new RegExp(`${ANON_COOKIE_NAME}=(\\d+)`));
-  return match ? parseInt(match[1], 10) : 0;
-}
 
 export async function POST(req: Request) {
   const startedAt = Date.now();
   try {
+    // Origin check — block requests not from our domains
+    if (!checkOrigin(req)) {
+      return Response.json({ ok: false, error: "Forbidden" }, { status: 403 });
+    }
+
     const body = await req.json();
     const { question, session_id: requestedSessionId, stream: useStreaming } = body as {
       question?: string;
@@ -41,7 +39,7 @@ export async function POST(req: Request) {
 
     // Server-side per-IP rate limiting (enforced before any LLM call)
     const clientIp = getClientIp(req);
-    const rateCheck = checkRateLimit(clientIp, getChatRateLimitConfig());
+    const rateCheck = await checkRateLimit(clientIp, getChatRateLimitConfig());
     if (!rateCheck.allowed) {
       logLlmTelemetry("chat_response", {
         route: "/api/chat",
@@ -91,10 +89,12 @@ export async function POST(req: Request) {
     const user = await optionalAuth(req);
     const userId = user?.id ?? null;
 
-    // Anonymous rate limiting
+    // Server-side anonymous daily limit (replaces cookie-based approach)
+    let remaining: number | null = null;
     if (!userId) {
-      const anonCount = getAnonCount(req);
-      if (anonCount >= ANON_RATE_LIMIT) {
+      const anonCheck = await checkRateLimit(`anon-daily:${clientIp}`, getAnonDailyLimitConfig());
+      remaining = anonCheck.remaining;
+      if (!anonCheck.allowed) {
         return Response.json(
           {
             ok: false,
@@ -102,21 +102,10 @@ export async function POST(req: Request) {
             message: "You've reached the free message limit. Sign up for unlimited chat.",
             remaining: 0,
           },
-          {
-            status: 429,
-            headers: { "Set-Cookie": `${ANON_COOKIE_NAME}=${anonCount}; Path=/; SameSite=Lax; Max-Age=86400` },
-          },
+          { status: 429 },
         );
       }
     }
-
-    // Track anonymous usage for rate limiting
-    const anonCount = userId ? 0 : getAnonCount(req);
-    const newAnonCount = anonCount + 1;
-    const anonCookieHeader: Record<string, string> = !userId
-      ? { "Set-Cookie": `${ANON_COOKIE_NAME}=${newAnonCount}; Path=/; SameSite=Lax; Max-Age=86400` }
-      : {};
-    const remaining = userId ? null : Math.max(0, ANON_RATE_LIMIT - newAnonCount);
 
     const supabase = getSupabaseAdmin();
     const flightIntent = parseFlightIntent(question);
@@ -146,19 +135,20 @@ You are also an airport operations specialist. The user is asking about ${dirLab
 You are also a flight operations specialist. For this query, you have flight-specific data and route intelligence below. Synthesize carrier status, suspension information, airspace status, and flight observations into a direct, comprehensive answer. Include alternatives if the primary carrier is suspended.`;
       }
 
+      // System blocks: stable prompt + situation context (cached together, >1024 tokens)
+      const flightSystemBlocks: SystemBlock[] = [
+        { type: "text", text: flightSystemPrompt },
+        { type: "text", text: `${situationContext}\n\n${routeIntel}`, cache_control: { type: "ephemeral" } },
+      ];
+
       const llmResult = await generateText({
         model: CHAT_MODEL,
         temperature: 0.1,
         maxTokens: CHAT_MAX_OUTPUT_TOKENS,
         timeoutMs: 45_000,
-        cacheSystem: true,
         signal: req.signal,
-        system: flightSystemPrompt,
-        userMessage: `${situationContext}
-
-${routeIntel}
-
-=== FLIGHT DATA ===
+        system: flightSystemBlocks,
+        userMessage: `=== FLIGHT DATA ===
 Summary: total=${result.summary.total}, delayed=${result.summary.delayed}, cancelled=${result.summary.cancelled}, latest_fetch=${result.summary.latest_fetch ?? "n/a"}
 Insight: ${result.insight ? `${result.insight.headline} | ${result.insight.summary} | confidence=${result.insight.confidence} | score=${result.insight.score ?? "n/a"}` : "n/a"}
 
@@ -198,17 +188,14 @@ Question: ${question}`,
           cache_write_tokens: llmResult.cache_usage.cache_creation_input_tokens,
         },
       });
-      return Response.json(
-        {
-          ok: true,
-          answer,
-          mode: flightIntent.type === "airport" ? "airport_query" : "flight_query",
-          summary: result.summary,
-          session_id: requestedSessionId,
-          ...(remaining != null ? { remaining } : {}),
-        },
-        { headers: anonCookieHeader },
-      );
+      return Response.json({
+        ok: true,
+        answer,
+        mode: flightIntent.type === "airport" ? "airport_query" : "flight_query",
+        summary: result.summary,
+        session_id: requestedSessionId,
+        ...(remaining != null ? { remaining } : {}),
+      });
     }
 
     // Precomputed answer fast path: for first-turn messages that match a known intent,
@@ -240,16 +227,13 @@ Question: ${question}`,
                 authenticated: !!userId,
               },
             });
-            return Response.json(
-              {
-                ok: true,
-                answer: cached.answer,
-                mode: "precomputed",
-                intent: cached.intent,
-                ...(remaining != null ? { remaining } : {}),
-              },
-              { headers: anonCookieHeader },
-            );
+            return Response.json({
+              ok: true,
+              answer: cached.answer,
+              mode: "precomputed",
+              intent: cached.intent,
+              ...(remaining != null ? { remaining } : {}),
+            });
           }
         }
       }
@@ -274,11 +258,14 @@ Question: ${question}`,
 
     const fullContext = [situationContext, userContext].filter(Boolean).join("\n\n");
 
-    // 4. Build message array for Claude
-    // Structure: history messages as plain strings, final user message with
-    // situation context as a cached block + question as a separate block.
-    // This maximizes prompt cache hits: the context block stays stable across
-    // messages within the same ~5-min ingestion window.
+    // 4. Build system blocks: stable prompt + situation context (cached together).
+    // Combined they exceed the 1024-token minimum for Sonnet prompt caching,
+    // so all chat messages within the same ~2-min context TTL share cached tokens.
+    const chatSystemBlocks: SystemBlock[] = [
+      { type: "text", text: CHAT_SYSTEM_PROMPT },
+      { type: "text", text: fullContext, cache_control: { type: "ephemeral" } },
+    ];
+
     const messages: StreamTextMessage[] = [];
 
     // Add conversation history as plain strings
@@ -286,14 +273,8 @@ Question: ${question}`,
       messages.push({ role: msg.role, content: msg.content });
     }
 
-    // Add current question: context (cached) + question (varies)
-    messages.push({
-      role: "user",
-      content: [
-        { type: "text", text: fullContext, cache_control: { type: "ephemeral" } },
-        { type: "text", text: `Question: ${question}` },
-      ],
-    });
+    // Add current question (context is now in system blocks, not here)
+    messages.push({ role: "user", content: `Question: ${question}` });
 
     // 5. Store user message
     if (sessionId) {
@@ -305,8 +286,7 @@ Question: ${question}`,
       const { stream, response: responsePromise } = streamText({
         model: CHAT_MODEL,
         temperature: 0.1,
-        cacheSystem: true,
-        system: CHAT_SYSTEM_PROMPT,
+        system: chatSystemBlocks,
         messages,
         maxTokens: CHAT_MAX_OUTPUT_TOKENS,
         signal: req.signal,
@@ -345,24 +325,21 @@ Question: ${question}`,
           Connection: "keep-alive",
           "X-Session-Id": sessionId ?? "",
           ...(remaining != null ? { "X-Remaining": String(remaining) } : {}),
-          ...anonCookieHeader,
         },
       });
     }
 
     // Non-streaming fallback
-    const flatUserMessage = `${fullContext}\n\nQuestion: ${question}`;
     const llmResult = await generateText({
       model: CHAT_MODEL,
       temperature: 0.1,
       maxTokens: CHAT_MAX_OUTPUT_TOKENS,
       timeoutMs: 45_000,
-      cacheSystem: true,
       signal: req.signal,
-      system: CHAT_SYSTEM_PROMPT,
+      system: chatSystemBlocks,
       userMessage: history.length > 0
-        ? history.map((m) => `${m.role}: ${m.content}`).join("\n\n") + `\n\nuser: ${flatUserMessage}`
-        : flatUserMessage,
+        ? history.map((m) => `${m.role}: ${m.content}`).join("\n\n") + `\n\nuser: Question: ${question}`
+        : `Question: ${question}`,
     });
 
     recordTokenUsage(llmResult.input_tokens ?? 0, llmResult.output_tokens ?? 0);
@@ -392,15 +369,12 @@ Question: ${question}`,
       },
     });
 
-    return Response.json(
-      {
-        ok: true,
-        answer,
-        session_id: sessionId,
-        ...(remaining != null ? { remaining } : {}),
-      },
-      { headers: anonCookieHeader },
-    );
+    return Response.json({
+      ok: true,
+      answer,
+      session_id: sessionId,
+      ...(remaining != null ? { remaining } : {}),
+    });
   } catch (error) {
     logLlmTelemetry("chat_response", {
       route: "/api/chat",

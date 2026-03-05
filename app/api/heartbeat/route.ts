@@ -1,4 +1,4 @@
-import { getInactivityMinutes, recordHeartbeat, kvStatus } from "@/lib/session-gate";
+import { getInactivityMinutes, recordHeartbeat } from "@/lib/session-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +10,5 @@ export async function POST() {
     ok: true,
     inactive_minutes: inactiveMinutes,
     needs_catch_up: inactiveMinutes !== null && inactiveMinutes > 30,
-    _debug_kv: kvStatus(),
   });
 }

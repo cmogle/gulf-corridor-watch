@@ -13,8 +13,11 @@ import {
   storeChatMessage,
 } from "@/lib/chat-context";
 import { classifyIntent, lookupPrecomputedAnswer } from "@/lib/precomputed-answers";
+import { checkRateLimit, getClientIp, getChatRateLimitConfig } from "@/lib/rate-limit";
+import { checkTokenBudget, recordTokenUsage } from "@/lib/token-budget";
 
 const CHAT_MODEL = "claude-sonnet-4-6";
+const CHAT_MAX_OUTPUT_TOKENS = 1024;
 const ANON_RATE_LIMIT = 5;
 const ANON_COOKIE_NAME = "gcw_anon_chat_count";
 
@@ -35,6 +38,44 @@ export async function POST(req: Request) {
     };
 
     if (!question) return Response.json({ ok: false, error: "Missing question" }, { status: 400 });
+
+    // Server-side per-IP rate limiting (enforced before any LLM call)
+    const clientIp = getClientIp(req);
+    const rateCheck = checkRateLimit(clientIp, getChatRateLimitConfig());
+    if (!rateCheck.allowed) {
+      logLlmTelemetry("chat_response", {
+        route: "/api/chat",
+        success: false,
+        duration_ms: Date.now() - startedAt,
+        error: "rate_limited",
+        context: { ip: clientIp, remaining: 0, reset_ms: rateCheck.resetMs },
+      });
+      return Response.json(
+        { ok: false, error: "Too many requests. Please wait and try again.", rate_limited: true },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(Math.ceil(rateCheck.resetMs / 1000)),
+          },
+        },
+      );
+    }
+
+    // Global daily token budget check
+    const budgetCheck = checkTokenBudget();
+    if (!budgetCheck.allowed) {
+      logLlmTelemetry("chat_response", {
+        route: "/api/chat",
+        success: false,
+        duration_ms: Date.now() - startedAt,
+        error: "token_budget_exceeded",
+        context: { reason: budgetCheck.reason, ...budgetCheck.usage },
+      });
+      return Response.json(
+        { ok: false, error: "Service temporarily unavailable due to high demand. Please try again later.", budget_exceeded: true },
+        { status: 503 },
+      );
+    }
 
     if (!hasAnthropicKey()) {
       logLlmTelemetry("chat_response", {
@@ -108,8 +149,10 @@ You are also a flight operations specialist. For this query, you have flight-spe
       const llmResult = await generateText({
         model: CHAT_MODEL,
         temperature: 0.1,
+        maxTokens: CHAT_MAX_OUTPUT_TOKENS,
         timeoutMs: 45_000,
         cacheSystem: true,
+        signal: req.signal,
         system: flightSystemPrompt,
         userMessage: `${situationContext}
 
@@ -124,6 +167,7 @@ ${dataContext || "No matching flights found."}
 Question: ${question}`,
       });
 
+      recordTokenUsage(llmResult.input_tokens ?? 0, llmResult.output_tokens ?? 0);
       const answer = llmResult.text || "No answer";
       const usage = extractClaudeUsage(llmResult);
 
@@ -264,11 +308,13 @@ Question: ${question}`,
         cacheSystem: true,
         system: CHAT_SYSTEM_PROMPT,
         messages,
-        maxTokens: 2048,
+        maxTokens: CHAT_MAX_OUTPUT_TOKENS,
+        signal: req.signal,
       });
 
       // Store the response async after streaming completes
       responsePromise.then(async (result) => {
+        recordTokenUsage(result.input_tokens ?? 0, result.output_tokens ?? 0);
         if (sessionId && result.text) {
           await storeChatMessage(sessionId, "assistant", result.text);
         }
@@ -309,15 +355,17 @@ Question: ${question}`,
     const llmResult = await generateText({
       model: CHAT_MODEL,
       temperature: 0.1,
-      maxTokens: 2048,
+      maxTokens: CHAT_MAX_OUTPUT_TOKENS,
       timeoutMs: 45_000,
       cacheSystem: true,
+      signal: req.signal,
       system: CHAT_SYSTEM_PROMPT,
       userMessage: history.length > 0
         ? history.map((m) => `${m.role}: ${m.content}`).join("\n\n") + `\n\nuser: ${flatUserMessage}`
         : flatUserMessage,
     });
 
+    recordTokenUsage(llmResult.input_tokens ?? 0, llmResult.output_tokens ?? 0);
     const answer = llmResult.text || "No answer";
     const usage = extractClaudeUsage(llmResult);
 

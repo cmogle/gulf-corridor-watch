@@ -1,5 +1,7 @@
 import { runFlightQuery } from "@/lib/flight-query";
 import { generateText, hasAnthropicKey } from "@/lib/anthropic";
+import { checkRateLimit, getClientIp, getChatRateLimitConfig } from "@/lib/rate-limit";
+import { checkTokenBudget, recordTokenUsage } from "@/lib/token-budget";
 
 function normalizedIntent(intent: Awaited<ReturnType<typeof runFlightQuery>>["intent"]) {
   if (intent.type === "flight_number") {
@@ -30,6 +32,24 @@ export async function POST(req: Request) {
       return Response.json({ ok: true, mode, normalized_intent: normalizedIntent(result.intent), ...result });
     }
 
+    // Rate limit and budget check for LLM "explain" mode
+    const clientIp = getClientIp(req);
+    const rateCheck = checkRateLimit(clientIp, getChatRateLimitConfig());
+    if (!rateCheck.allowed) {
+      return Response.json(
+        { ok: true, mode, normalized_intent: normalizedIntent(result.intent), ...result, explanation: "Rate limited. Please try again later." },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rateCheck.resetMs / 1000)) } },
+      );
+    }
+
+    const budgetCheck = checkTokenBudget();
+    if (!budgetCheck.allowed) {
+      return Response.json({
+        ok: true, mode, normalized_intent: normalizedIntent(result.intent), ...result,
+        explanation: "AI explanation temporarily unavailable due to high demand.",
+      });
+    }
+
     if (!hasAnthropicKey()) {
       return Response.json({
         ok: true,
@@ -50,6 +70,8 @@ export async function POST(req: Request) {
     const llmResult = await generateText({
       model: "claude-sonnet-4-6",
       temperature: 0.1,
+      maxTokens: 512,
+      signal: req.signal,
       system:
         "You are a flight operations assistant. Use only the provided dataset summary and rows. Keep response concise, explicit about uncertainty, and include latest fetch timestamp.",
       userMessage: `Question: ${query}
@@ -59,6 +81,7 @@ Rows:
 ${contextRows || "none"}`,
     });
 
+    recordTokenUsage(llmResult.input_tokens ?? 0, llmResult.output_tokens ?? 0);
     const explanation = llmResult.text || null;
     return Response.json({ ok: true, mode, normalized_intent: normalizedIntent(result.intent), ...result, explanation });
   } catch (error) {

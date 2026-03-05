@@ -105,6 +105,8 @@ export type StreamTextOptions = {
   timeoutMs?: number;
   /** Enable prompt caching on the system prompt */
   cacheSystem?: boolean;
+  /** AbortSignal to cancel the stream (e.g., when client disconnects) */
+  signal?: AbortSignal;
 };
 
 export type StreamTextResult = {
@@ -141,8 +143,9 @@ export function streamText(opts: StreamTextOptions): {
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      let anthropicStream: ReturnType<typeof client.messages.stream> | null = null;
       try {
-        const anthropicStream = client.messages.stream(
+        anthropicStream = client.messages.stream(
           {
             model,
             max_tokens: maxTokens,
@@ -151,6 +154,7 @@ export function streamText(opts: StreamTextOptions): {
             messages: opts.messages,
           },
           {
+            signal: opts.signal,
             timeout: opts.timeoutMs ?? 45_000,
           },
         );
@@ -180,6 +184,8 @@ export function streamText(opts: StreamTextOptions): {
           },
         });
       } catch (error) {
+        // Abort the Anthropic stream if still running (prevents wasted tokens)
+        try { anthropicStream?.abort(); } catch { /* ignore */ }
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: String(error) })}\n\n`));
         controller.close();
         resolveResponse!({
@@ -189,6 +195,11 @@ export function streamText(opts: StreamTextOptions): {
           cache_usage: { cache_creation_input_tokens: null, cache_read_input_tokens: null },
         });
       }
+    },
+    cancel() {
+      // Client disconnected — this is called when the readable stream is cancelled.
+      // We can't easily abort the Anthropic stream from here since it's in the start() closure,
+      // but the signal passed to the SDK will handle it if provided.
     },
   });
 

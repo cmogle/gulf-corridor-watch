@@ -43,6 +43,9 @@ type ChatResult = {
   error?: string;
   mode?: string;
   summary?: { total?: number; delayed?: number; cancelled?: number; latest_fetch?: string | null };
+  limit_reached?: boolean;
+  message?: string;
+  remaining?: number;
 };
 
 type QueryResult =
@@ -113,7 +116,11 @@ export function UnifiedQuery({ suggestedPrompts = [], variant = "hero" }: Props)
           body: JSON.stringify({ question }),
         });
         const json = (await res.json()) as ChatResult;
-        setResult({ type: "chat", data: json });
+        if (json.limit_reached) {
+          setResult({ type: "chat", data: { ok: false, limit_reached: true, message: json.message } });
+        } else {
+          setResult({ type: "chat", data: json });
+        }
       } catch {
         setResult({ type: "chat", data: { ok: false, error: "Request failed" } });
       }
@@ -262,7 +269,16 @@ export function UnifiedQuery({ suggestedPrompts = [], variant = "hero" }: Props)
             </div>
           )}
 
-          {result && !result.data.ok && (
+          {result?.type === "chat" && result.data.limit_reached && (
+            <div className={`rounded-xl p-4 text-sm ${isOnDark ? "bg-white/10 text-white/90" : "bg-white border border-gray-200 text-[var(--text-primary)]"}`}>
+              <p className="font-medium">{result.data.message ?? "Free message limit reached."}</p>
+              <a href="/auth" className="mt-2 inline-block rounded-lg bg-[var(--primary-blue)] px-4 py-2 text-sm font-medium text-white hover:opacity-90">
+                Sign up free
+              </a>
+            </div>
+          )}
+
+          {result && !result.data.ok && !("limit_reached" in result.data && result.data.limit_reached) && (
             <p className="text-sm text-[var(--red)]">{result.data.error ?? "Something went wrong."}</p>
           )}
 

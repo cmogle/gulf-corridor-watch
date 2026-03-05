@@ -16,6 +16,9 @@ import { ResourcesPanel } from "@/app/components/resources-panel";
 import { AirspacePulseAtlas } from "@/app/components/pulse-atlas";
 import { SourceHealth } from "@/app/components/source-health";
 import { ExpertAnalysisPanel } from "@/app/components/expert-analysis-panel";
+import { CrisisPanel } from "@/app/components/crisis-timeline";
+import { getActiveEventsWithStats } from "@/lib/crisis-stats";
+import { getCrisisTimeline } from "@/lib/crisis-timeline";
 
 export const dynamic = "force-dynamic";
 
@@ -197,6 +200,20 @@ export default async function Home() {
   const suggestedFlightPrompts = buildFlightPromptSuggestions(pulse);
   const initialUpdates = await loadUnifiedFeed(80).catch(() => []);
 
+  // Load crisis trend for StatusHero indicator
+  let crisisTrend: "improving" | "worsening" | "stable" | null = null;
+  try {
+    const events = await getActiveEventsWithStats();
+    if (events.length > 0) {
+      const timeline = await getCrisisTimeline(events[0]);
+      if (timeline.trend.trajectory === "getting_better") crisisTrend = "improving";
+      else if (timeline.trend.trajectory === "getting_worse") crisisTrend = "worsening";
+      else crisisTrend = "stable";
+    }
+  } catch {
+    // Crisis data unavailable
+  }
+
   const posture: "normal" | "heightened" | "unclear" =
     currentBrief?.confidence === "low" || currentBrief?.freshness_state === "stale"
       ? "unclear"
@@ -216,11 +233,15 @@ export default async function Home() {
         updatedAt={pulse.latestFetch}
         sourceCount={usableRows.length}
         suggestedPrompts={suggestedFlightPrompts}
+        trend={crisisTrend}
       />
+
+      <CrisisPanel />
 
       {currentBrief && (
         <SituationBriefing
           paragraph={currentBrief.paragraph}
+          sections={currentBrief.sections}
           refreshedAt={currentBrief.refreshed_at}
           confidence={currentBrief.confidence}
           sourceCount={currentBrief.coverage.sources_included.length}

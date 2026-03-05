@@ -1,3 +1,13 @@
+/**
+ * Trust tiers for source attribution confidence:
+ * 1 = Official government/military (CONFIRMED)
+ * 2 = Airlines/airports (CONFIRMED)
+ * 3 = Credible media/transport (REPORTED)
+ * 4 = Aggregated news (REPORTED)
+ * 5 = Social/unverified (UNVERIFIED)
+ */
+export type TrustTier = 1 | 2 | 3 | 4 | 5;
+
 export type SourceDef = {
   id: string;
   name: string;
@@ -20,12 +30,25 @@ export type SourceDef = {
     | "flydubai_updates"
     | "air_arabia_updates"
     | "qatar_airways_updates"
-    | "gcaa_news";
+    | "gcaa_news"
+    | "uae_mod_news"
+    | "saudi_mod_news"
+    | "faa_notams"
+    | "dubai_airports_news"
+    | "abu_dhabi_airports_news"
+    | "eurocontrol_news";
+  trust_tier: TrustTier;
   priority: number;
   freshness_target_minutes: number;
   x_handles?: string[];
   region: string;
 };
+
+export function confidenceLabelForTier(tier: TrustTier): "CONFIRMED" | "REPORTED" | "UNVERIFIED" {
+  if (tier <= 2) return "CONFIRMED";
+  if (tier <= 4) return "REPORTED";
+  return "UNVERIFIED";
+}
 
 export const PROJECT_NAME = "Gulf Corridor Watch";
 
@@ -38,6 +61,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "rss",
     connector: "rss",
     extractor_id: "rss_default",
+    trust_tier: 1,
     priority: 80,
     freshness_target_minutes: 15,
     region: "Global/US",
@@ -50,6 +74,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "rss",
     connector: "rss",
     extractor_id: "rss_default",
+    trust_tier: 1,
     priority: 92,
     freshness_target_minutes: 10,
     x_handles: ["POTUS", "WhiteHouse"],
@@ -63,6 +88,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "rss",
     connector: "rss",
     extractor_id: "rss_default",
+    trust_tier: 1,
     priority: 91,
     freshness_target_minutes: 10,
     x_handles: ["DeptofDefense"],
@@ -76,6 +102,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "rss",
     connector: "rss",
     extractor_id: "rss_default",
+    trust_tier: 1,
     priority: 93,
     freshness_target_minutes: 10,
     x_handles: ["CENTCOM"],
@@ -90,6 +117,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     connector: "direct_html",
     fallback_connector: "chrome_relay",
     extractor_id: "mofa_news",
+    trust_tier: 1,
     priority: 88,
     freshness_target_minutes: 10,
     x_handles: ["mofauae"],
@@ -104,6 +132,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     connector: "direct_html",
     fallback_connector: "chrome_relay",
     extractor_id: "visit_dubai_articles",
+    trust_tier: 1,
     priority: 55,
     freshness_target_minutes: 15,
     region: "Dubai",
@@ -117,6 +146,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     connector: "direct_html",
     fallback_connector: "chrome_relay",
     extractor_id: "emirates_updates",
+    trust_tier: 2,
     priority: 100,
     freshness_target_minutes: 5,
     x_handles: ["emirates"],
@@ -131,6 +161,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     connector: "direct_html",
     fallback_connector: "chrome_relay",
     extractor_id: "etihad_updates",
+    trust_tier: 2,
     priority: 98,
     freshness_target_minutes: 5,
     x_handles: ["etihad"],
@@ -145,6 +176,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     connector: "direct_html",
     fallback_connector: "chrome_relay",
     extractor_id: "omanair_updates",
+    trust_tier: 2,
     priority: 70,
     freshness_target_minutes: 10,
     region: "Oman",
@@ -157,6 +189,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "rss",
     connector: "rss",
     extractor_id: "rss_default",
+    trust_tier: 3,
     priority: 90,
     freshness_target_minutes: 5,
     x_handles: ["rta_dubai"],
@@ -171,6 +204,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     connector: "direct_html",
     fallback_connector: "chrome_relay",
     extractor_id: "india_mea_press",
+    trust_tier: 1,
     priority: 65,
     freshness_target_minutes: 15,
     region: "India",
@@ -184,6 +218,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     connector: "direct_html",
     fallback_connector: "chrome_relay",
     extractor_id: "india_boi_home",
+    trust_tier: 1,
     priority: 72,
     freshness_target_minutes: 15,
     region: "India",
@@ -197,6 +232,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     connector: "direct_html",
     fallback_connector: "chrome_relay",
     extractor_id: "flydubai_updates",
+    trust_tier: 2,
     priority: 95,
     freshness_target_minutes: 5,
     x_handles: ["flydubai"],
@@ -211,6 +247,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     connector: "direct_html",
     fallback_connector: "chrome_relay",
     extractor_id: "air_arabia_updates",
+    trust_tier: 2,
     priority: 85,
     freshness_target_minutes: 10,
     x_handles: ["aaboriginal"],
@@ -225,6 +262,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     connector: "direct_html",
     fallback_connector: "chrome_relay",
     extractor_id: "html_title_text",
+    trust_tier: 2,
     priority: 80,
     freshness_target_minutes: 10,
     region: "Qatar (transit via Doha)",
@@ -237,7 +275,8 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "html",
     connector: "direct_html",
     fallback_connector: "chrome_relay",
-    extractor_id: "html_title_text",
+    extractor_id: "gcaa_news",
+    trust_tier: 1,
     priority: 96,
     freshness_target_minutes: 5,
     x_handles: ["ABORJALUAE"],
@@ -251,6 +290,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "rss",
     connector: "rss",
     extractor_id: "rss_default",
+    trust_tier: 1,
     priority: 75,
     freshness_target_minutes: 15,
     region: "UK / UAE",
@@ -264,6 +304,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     connector: "direct_html",
     fallback_connector: "chrome_relay",
     extractor_id: "html_title_text",
+    trust_tier: 1,
     priority: 60,
     freshness_target_minutes: 30,
     region: "Australia / UAE",
@@ -277,6 +318,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     connector: "direct_html",
     fallback_connector: "chrome_relay",
     extractor_id: "html_title_text",
+    trust_tier: 1,
     priority: 58,
     freshness_target_minutes: 30,
     region: "Canada / UAE",
@@ -289,6 +331,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "rss",
     connector: "rss",
     extractor_id: "rss_default",
+    trust_tier: 4,
     priority: 55,
     freshness_target_minutes: 10,
     region: "UAE",
@@ -301,6 +344,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "rss",
     connector: "rss",
     extractor_id: "rss_default",
+    trust_tier: 4,
     priority: 55,
     freshness_target_minutes: 10,
     region: "Gulf region",
@@ -313,6 +357,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "rss",
     connector: "rss",
     extractor_id: "rss_default",
+    trust_tier: 4,
     priority: 50,
     freshness_target_minutes: 15,
     region: "Gulf region",
@@ -325,6 +370,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "rss",
     connector: "rss",
     extractor_id: "rss_default",
+    trust_tier: 4,
     priority: 55,
     freshness_target_minutes: 10,
     region: "Dubai",
@@ -337,6 +383,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "rss",
     connector: "rss",
     extractor_id: "rss_default",
+    trust_tier: 4,
     priority: 45,
     freshness_target_minutes: 15,
     region: "India / UAE",
@@ -349,6 +396,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "rss",
     connector: "rss",
     extractor_id: "rss_default",
+    trust_tier: 3,
     priority: 60,
     freshness_target_minutes: 10,
     region: "Middle East",
@@ -361,6 +409,7 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "rss",
     connector: "rss",
     extractor_id: "rss_default",
+    trust_tier: 3,
     priority: 58,
     freshness_target_minutes: 10,
     region: "Global / Middle East",
@@ -373,8 +422,138 @@ export const OFFICIAL_SOURCES: SourceDef[] = [
     parser: "rss",
     connector: "rss",
     extractor_id: "rss_default",
+    trust_tier: 1,
     priority: 70,
     freshness_target_minutes: 15,
     region: "UK / Iran",
+  },
+  // ── Defense & Security Sources (T-021) ──
+  {
+    id: "uae_mod",
+    name: "UAE Ministry of Defence",
+    category: "government",
+    url: "https://www.mod.gov.ae/en/open-data/media-center/news",
+    parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "uae_mod_news",
+    trust_tier: 1,
+    priority: 95,
+    freshness_target_minutes: 10,
+    x_handles: ["ABORJALUAE"],
+    region: "UAE",
+  },
+  {
+    id: "saudi_mod",
+    name: "Saudi Ministry of Defence",
+    category: "government",
+    url: "https://www.mod.gov.sa/en/MediaCenter/News/Pages/default.aspx",
+    parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "saudi_mod_news",
+    trust_tier: 1,
+    priority: 70,
+    freshness_target_minutes: 30,
+    region: "Saudi Arabia",
+  },
+  {
+    id: "bahrain_bdf",
+    name: "Bahrain Defence Force",
+    category: "government",
+    url: "https://www.bdf.bh/en/bdf-news",
+    parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "html_title_text",
+    trust_tier: 1,
+    priority: 65,
+    freshness_target_minutes: 30,
+    region: "Bahrain",
+  },
+  {
+    id: "us_navy_centcom",
+    name: "US Naval Forces Central Command",
+    category: "government",
+    url: "https://www.cusnc.navy.mil/Media/News/",
+    parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "html_title_text",
+    trust_tier: 1,
+    priority: 88,
+    freshness_target_minutes: 15,
+    x_handles: ["ABORJALUAE", "NAVCENT"],
+    region: "Gulf / Arabian Sea",
+  },
+  {
+    id: "iran_fars_en",
+    name: "Fars News Agency (English)",
+    category: "news",
+    url: "https://www.farsnews.ir/en/rss",
+    parser: "rss",
+    connector: "rss",
+    extractor_id: "rss_default",
+    trust_tier: 4,
+    priority: 50,
+    freshness_target_minutes: 15,
+    region: "Iran",
+  },
+  // ── Aviation Operations Sources (T-022) ──
+  {
+    id: "dubai_airports",
+    name: "Dubai Airports",
+    category: "transport",
+    url: "https://www.dubaiairports.ae/corporate/media-centre/news-listing",
+    parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "dubai_airports_news",
+    trust_tier: 2,
+    priority: 90,
+    freshness_target_minutes: 10,
+    x_handles: ["DubaiAirports"],
+    region: "Dubai",
+  },
+  {
+    id: "abu_dhabi_airports",
+    name: "Abu Dhabi Airports",
+    category: "transport",
+    url: "https://www.abudhabiairport.ae/en/media-centre",
+    parser: "html",
+    connector: "direct_html",
+    fallback_connector: "chrome_relay",
+    extractor_id: "abu_dhabi_airports_news",
+    trust_tier: 2,
+    priority: 88,
+    freshness_target_minutes: 10,
+    x_handles: ["AUH"],
+    region: "Abu Dhabi",
+  },
+  {
+    id: "faa_tfr",
+    name: "FAA Temporary Flight Restrictions",
+    category: "government",
+    url: "https://tfr.faa.gov/tfr2/list.html",
+    parser: "html",
+    connector: "direct_html",
+    extractor_id: "faa_notams",
+    trust_tier: 1,
+    priority: 85,
+    freshness_target_minutes: 15,
+    region: "US / International",
+  },
+  {
+    id: "eurocontrol_news",
+    name: "EUROCONTROL",
+    category: "government",
+    url: "https://www.eurocontrol.int/news",
+    parser: "html",
+    connector: "direct_html",
+    extractor_id: "eurocontrol_news",
+    trust_tier: 2,
+    priority: 75,
+    freshness_target_minutes: 30,
+    region: "Europe / Overfly",
   },
 ];

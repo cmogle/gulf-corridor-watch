@@ -394,6 +394,137 @@ function extractBySource(source: SourceDef, html: string): { title: string; summ
     return { title, summary, publishedAt: base.publishedAt, rawText: base.rawText };
   }
 
+  if (source.extractor_id === "gcaa_news") {
+    // gcaa.gov.ae — ASP.NET rendered news list; extract aviation-specific headlines
+    const headings = readJinaHeadings(html, 8);
+    const latestHeadline = headings.find((h) =>
+      /airspace|notam|restriction|closure|flight|airport|aviation|safety|drone|aircraft|air traffic/i.test(h)
+    ) ?? headings[0] ?? null;
+    const title = latestHeadline ?? readMeta(html, "og:title") ?? "UAE General Civil Aviation Authority";
+    const summary = selectSummary(
+      [
+        headings.slice(0, 5).join(" | ") || null,
+        readMeta(html, "description"),
+        ...readAnchorsWithKeywords(cleaned, ["airspace", "notam", "restriction", "closure", "flight", "airport", "aviation", "safety", "drone", "air traffic"], 8),
+        ...readTagTexts(cleaned, "h2", 4),
+      ],
+      base.rawText,
+    );
+    return { title, summary, publishedAt: base.publishedAt, rawText: base.rawText };
+  }
+
+  if (source.extractor_id === "uae_mod_news") {
+    // mod.gov.ae — SPA-rendered news centre; Jina returns markdown headings
+    const headings = readJinaHeadings(html, 8);
+    const latestHeadline = headings.find((h) =>
+      /military|defence|defense|airspace|missile|intercept|drone|navy|air force|army|exercise|operation|coast guard|threat|strike/i.test(h)
+    ) ?? headings[0] ?? null;
+    const title = latestHeadline ?? readMeta(html, "og:title") ?? "UAE Ministry of Defence";
+    const summary = selectSummary(
+      [
+        headings.slice(0, 5).join(" | ") || null,
+        readMeta(html, "description"),
+        ...readAnchorsWithKeywords(cleaned, ["defence", "defense", "military", "airspace", "missile", "navy", "air force", "drone", "intercept", "operation"], 8),
+        ...readTagTexts(cleaned, "h2", 4),
+      ],
+      base.rawText,
+    );
+    return { title, summary, publishedAt: base.publishedAt, rawText: base.rawText };
+  }
+
+  if (source.extractor_id === "saudi_mod_news") {
+    // mod.gov.sa — SharePoint-based news; extract headings and defence keywords
+    const headings = readJinaHeadings(html, 8);
+    const latestHeadline = headings.find((h) =>
+      /military|defence|defense|coalition|intercept|missile|houthi|drone|navy|air force|threat|strike|border|operation/i.test(h)
+    ) ?? headings[0] ?? null;
+    const title = latestHeadline ?? readMeta(html, "og:title") ?? "Saudi Ministry of Defence";
+    const summary = selectSummary(
+      [
+        headings.slice(0, 5).join(" | ") || null,
+        readMeta(html, "description"),
+        ...readAnchorsWithKeywords(cleaned, ["defence", "defense", "military", "coalition", "intercept", "missile", "houthi", "drone", "border", "operation"], 8),
+        ...readTagTexts(cleaned, "h2", 4),
+      ],
+      base.rawText,
+    );
+    return { title, summary, publishedAt: base.publishedAt, rawText: base.rawText };
+  }
+
+  if (source.extractor_id === "dubai_airports_news") {
+    // dubaiairports.ae — corporate media centre; extract aviation ops headlines
+    const headings = readJinaHeadings(html, 8);
+    const latestHeadline = headings.find((h) =>
+      /terminal|runway|capacity|passenger|delay|diversion|closure|reopen|operation|record|traffic|expand/i.test(h)
+    ) ?? headings[0] ?? null;
+    const title = latestHeadline ?? readMeta(html, "og:title") ?? "Dubai Airports";
+    const summary = selectSummary(
+      [
+        headings.slice(0, 5).join(" | ") || null,
+        readMeta(html, "description"),
+        readMeta(html, "og:description"),
+        ...readAnchorsWithKeywords(cleaned, ["terminal", "runway", "passenger", "delay", "closure", "diversion", "operation", "capacity", "DXB", "DWC"], 8),
+        ...readTagTexts(cleaned, "h2", 4),
+      ],
+      base.rawText,
+    );
+    return { title, summary, publishedAt: base.publishedAt, rawText: base.rawText };
+  }
+
+  if (source.extractor_id === "abu_dhabi_airports_news") {
+    // abudhabiairport.ae — media centre; extract aviation ops headlines
+    const headings = readJinaHeadings(html, 8);
+    const latestHeadline = headings.find((h) =>
+      /terminal|runway|passenger|delay|diversion|closure|reopen|operation|record|traffic|expand|midfield/i.test(h)
+    ) ?? headings[0] ?? null;
+    const title = latestHeadline ?? readMeta(html, "og:title") ?? "Abu Dhabi Airports";
+    const summary = selectSummary(
+      [
+        headings.slice(0, 5).join(" | ") || null,
+        readMeta(html, "description"),
+        readMeta(html, "og:description"),
+        ...readAnchorsWithKeywords(cleaned, ["terminal", "runway", "passenger", "delay", "closure", "diversion", "operation", "AUH", "Zayed", "midfield"], 8),
+        ...readTagTexts(cleaned, "h2", 4),
+      ],
+      base.rawText,
+    );
+    return { title, summary, publishedAt: base.publishedAt, rawText: base.rawText };
+  }
+
+  if (source.extractor_id === "faa_notams") {
+    // tfr.faa.gov — plain HTML table of TFRs; extract table rows and relevant content
+    const title = readMeta(html, "og:title") ?? "FAA Temporary Flight Restrictions";
+    const summary = selectSummary(
+      [
+        ...readTagTexts(cleaned, "h1", 2),
+        ...readTagTexts(cleaned, "h2", 4),
+        ...readAnchorsWithKeywords(cleaned, ["tfr", "notam", "restriction", "airspace", "hazard", "military", "security", "prohibited"], 8),
+        ...readTagTexts(cleaned, "p", 6),
+      ],
+      base.rawText,
+    );
+    return { title, summary, publishedAt: base.publishedAt, rawText: base.rawText };
+  }
+
+  if (source.extractor_id === "eurocontrol_news") {
+    // eurocontrol.int/news — news listing page
+    const headings = readJinaHeadings(html, 8);
+    const latestHeadline = headings.find((h) =>
+      /airspace|conflict|restriction|capacity|delay|flow|strike|closure|network|traffic|route|flight/i.test(h)
+    ) ?? headings[0] ?? null;
+    const title = latestHeadline ?? readMeta(html, "og:title") ?? "EUROCONTROL";
+    const summary = selectSummary(
+      [
+        headings.slice(0, 5).join(" | ") || null,
+        readMeta(html, "description"),
+        ...readAnchorsWithKeywords(cleaned, ["airspace", "conflict", "restriction", "delay", "capacity", "network", "route", "flight", "closure"], 8),
+        ...readTagTexts(cleaned, "h2", 4),
+      ],
+      base.rawText,
+    );
+    return { title, summary, publishedAt: base.publishedAt, rawText: base.rawText };
+  }
+
   const title = readMeta(html, "og:title") ?? base.pageTitle;
   const summary = selectSummary(
     [

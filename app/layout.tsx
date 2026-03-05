@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { AuthProvider } from "@/app/components/auth-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -38,7 +39,9 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="min-h-screen antialiased">{children}</body>
+      <body className="min-h-screen antialiased">
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

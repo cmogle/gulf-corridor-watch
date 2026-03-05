@@ -70,6 +70,72 @@ export async function generateText(opts: GenerateTextOptions): Promise<GenerateT
   };
 }
 
+export type StreamTextOptions = {
+  system: string;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  timeoutMs?: number;
+};
+
+/**
+ * Stream a multi-turn conversation. Returns a ReadableStream of text chunks
+ * and a promise that resolves to the full text + usage.
+ */
+export function streamText(opts: StreamTextOptions): {
+  stream: ReadableStream<Uint8Array>;
+  response: Promise<{ text: string; input_tokens: number | null; output_tokens: number | null }>;
+} {
+  const client = getAnthropicClient();
+  const model = opts.model ?? DEFAULT_MODEL;
+  const maxTokens = opts.maxTokens ?? 2048;
+
+  let resolveResponse: (value: { text: string; input_tokens: number | null; output_tokens: number | null }) => void;
+  const response = new Promise<{ text: string; input_tokens: number | null; output_tokens: number | null }>((resolve) => {
+    resolveResponse = resolve;
+  });
+
+  const encoder = new TextEncoder();
+  let fullText = "";
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        const anthropicStream = client.messages.stream({
+          model,
+          max_tokens: maxTokens,
+          temperature: opts.temperature ?? 0.1,
+          system: opts.system,
+          messages: opts.messages,
+        });
+
+        for await (const event of anthropicStream) {
+          if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+            const chunk = event.delta.text;
+            fullText += chunk;
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`));
+          }
+        }
+
+        const finalMessage = await anthropicStream.finalMessage();
+        const inputTokens = finalMessage.usage?.input_tokens ?? null;
+        const outputTokens = finalMessage.usage?.output_tokens ?? null;
+
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+        controller.close();
+        resolveResponse!({ text: fullText, input_tokens: inputTokens, output_tokens: outputTokens });
+      } catch (error) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: String(error) })}\n\n`));
+        controller.close();
+        resolveResponse!({ text: fullText, input_tokens: null, output_tokens: null });
+      }
+    },
+  });
+
+  return { stream, response };
+}
+
 export function extractClaudeUsage(usage?: { input_tokens?: number | null; output_tokens?: number | null } | null) {
   const input = usage?.input_tokens ?? null;
   const output = usage?.output_tokens ?? null;

@@ -2,6 +2,8 @@ import { createHash } from "crypto";
 import { generateText, hasAnthropicKey, extractClaudeUsage } from "./anthropic";
 import { gateSnapshotContext, gateSocialContext, getContextGatingConfig, type ContextGateSummary } from "./context-gating";
 import { logLlmTelemetry } from "./llm-telemetry";
+import { generateStructuredBrief, type BriefSections } from "./intelligence-brief";
+import { OFFICIAL_SOURCES, confidenceLabelForTier, type TrustTier } from "./sources";
 
 const BRIEF_KEY = "global";
 const DEFAULT_MODEL = "claude-sonnet-4-6";
@@ -87,6 +89,7 @@ export type BriefCoverage = {
 
 export type CurrentStateBrief = {
   paragraph: string;
+  sections: BriefSections | null;
   generated_at: string;
   refreshed_at: string;
   freshness_state: BriefFreshnessState;
@@ -108,6 +111,8 @@ type BriefSourceContext = {
   reliability: "reliable" | "degraded" | "blocked";
   validation_state: "validated" | "unvalidated" | "failed" | "skipped";
   priority: number;
+  trust_tier: TrustTier;
+  confidence_label: "CONFIRMED" | "REPORTED" | "UNVERIFIED";
   fetched_at: string;
   published_at: string | null;
   freshness_target_minutes: number;
@@ -181,6 +186,7 @@ type FlightRow = {
 type PersistedBriefRow = {
   key: string;
   paragraph: string;
+  sections: unknown;
   input_hash: string;
   generated_at: string;
   refreshed_at: string;
@@ -196,6 +202,8 @@ type NarrativeEvidenceRow = {
   source_id: string;
   source_name: string;
   status_level: BriefSourceContext["status_level"];
+  trust_tier: TrustTier;
+  confidence_label: "CONFIRMED" | "REPORTED" | "UNVERIFIED";
   fetched_at: string;
   clause: string;
 };
@@ -452,11 +460,14 @@ function buildEvidenceClause(row: BriefSourceContext): string {
   return compact(picked, 150);
 }
 
-function selectNarrativeEvidenceRows(context: BriefInputContext, maxRows = 2): NarrativeEvidenceRow[] {
+function selectNarrativeEvidenceRows(context: BriefInputContext, maxRows = 12): NarrativeEvidenceRow[] {
   const seen = new Set<string>();
   const rows = [...context.sources].sort((a, b) => {
     const levelDiff = statusRank(b.status_level) - statusRank(a.status_level);
     if (levelDiff !== 0) return levelDiff;
+    // Higher trust (lower tier number) first
+    const tierDiff = a.trust_tier - b.trust_tier;
+    if (tierDiff !== 0) return tierDiff;
     const priorityDiff = b.priority - a.priority;
     if (priorityDiff !== 0) return priorityDiff;
     return toMillis(b.fetched_at) - toMillis(a.fetched_at);
@@ -475,6 +486,8 @@ function selectNarrativeEvidenceRows(context: BriefInputContext, maxRows = 2): N
       source_id: row.source_id,
       source_name: row.source_name,
       status_level: row.status_level,
+      trust_tier: row.trust_tier,
+      confidence_label: row.confidence_label,
       fetched_at: row.fetched_at,
       clause: compact(evidenceText, 180),
     });
@@ -483,7 +496,7 @@ function selectNarrativeEvidenceRows(context: BriefInputContext, maxRows = 2): N
   return out;
 }
 
-function selectCorroboratedSocialRows(context: BriefInputContext, maxRows = 2): CorroboratedSocialRow[] {
+function selectCorroboratedSocialRows(context: BriefInputContext, maxRows = 8): CorroboratedSocialRow[] {
   const sourceById = new Map(context.sources.map((row) => [row.source_id, row]));
   return context.social_signals
     .filter((row) => row.keywords.length > 0)
@@ -553,7 +566,7 @@ function buildConfirmedSentence(rows: NarrativeEvidenceRow[], socialRows: Corrob
   if (rows.length === 0 && socialRows.length === 0) {
     return "Confirmed official signals: no clear official notices of missile, drone, or military-aircraft incidents were found in current ingested sources.";
   }
-  const sourcePart = rows.map((row) => `${row.source_name}: ${row.clause}`).join("; ");
+  const sourcePart = rows.map((row) => `[${row.confidence_label}] ${row.source_name}: ${row.clause}`).join("; ");
   const socialPart =
     socialRows.length > 0
       ? ` Corroborated official X signals: ${socialRows.map((row) => `@${row.handle}: ${row.text}`).join("; ")}.`
@@ -633,9 +646,21 @@ function normalizeCoverage(value: unknown): BriefCoverage {
   };
 }
 
+function normalizeSections(value: unknown): BriefSections | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const security = typeof raw.security === "string" ? raw.security : "";
+  const flights = typeof raw.flights === "string" ? raw.flights : "";
+  const guidance = typeof raw.guidance === "string" ? raw.guidance : "";
+  const source_coverage = typeof raw.source_coverage === "string" ? raw.source_coverage : "";
+  if (!security && !flights && !guidance && !source_coverage) return null;
+  return { security, flights, guidance, source_coverage };
+}
+
 function rowToBrief(row: PersistedBriefRow): CurrentStateBrief {
   return {
     paragraph: row.paragraph,
+    sections: normalizeSections(row.sections),
     generated_at: row.generated_at,
     refreshed_at: row.refreshed_at,
     freshness_state: row.freshness_state,
@@ -687,9 +712,11 @@ export async function buildBriefInputContext(): Promise<BriefInputContext> {
 
   const nowIso = new Date().toISOString();
 
+  const sourceTierMap = new Map(OFFICIAL_SOURCES.map((s) => [s.id, s.trust_tier]));
   const mappedSources = ((snapshots ?? []) as SnapshotRow[])
     .map((row) => {
       const stale = isSourceStale(ageMinutes(row.fetched_at, nowMs), row.freshness_target_minutes);
+      const trust_tier = (sourceTierMap.get(row.source_id) ?? 4) as TrustTier;
       return {
         source_id: row.source_id,
         source_name: row.source_name,
@@ -697,6 +724,8 @@ export async function buildBriefInputContext(): Promise<BriefInputContext> {
         reliability: row.reliability,
         validation_state: row.validation_state,
         priority: Number(row.priority ?? 0) || 0,
+        trust_tier,
+        confidence_label: confidenceLabelForTier(trust_tier),
         fetched_at: row.fetched_at,
         published_at: row.published_at,
         freshness_target_minutes: row.freshness_target_minutes,
@@ -878,7 +907,6 @@ async function generateBriefParagraphWithModel(
   try {
     const advisoryRows = context.sources
       .filter((row) => row.status_level === "advisory" || row.status_level === "disrupted")
-      .slice(0, 6)
       .map((row) => ({
         source: row.source_name,
         status_level: row.status_level,
@@ -1011,6 +1039,7 @@ export async function loadCurrentStateBrief(opts?: { allowTransient?: boolean })
   const context = await buildBriefInputContext();
   return {
     paragraph: buildFallbackBriefParagraph(context),
+    sections: null,
     generated_at: context.computed_at,
     refreshed_at: context.computed_at,
     freshness_state: context.freshness_state,
@@ -1074,8 +1103,18 @@ export async function refreshCurrentStateBrief(opts?: { forceRegenerate?: boolea
 
   const basis = buildNarrativeBasis(context);
   const fallbackParagraph = buildFallbackBriefParagraph(context);
-  const generation = await generateBriefParagraphWithModel(context, fallbackParagraph, basis);
+
+  // Generate both: legacy paragraph + structured sections
+  const [generation, structuredGeneration] = await Promise.all([
+    generateBriefParagraphWithModel(context, fallbackParagraph, basis),
+    generateStructuredBrief(context, basis),
+  ]);
   const generatedAt = nowIso;
+
+  // Use structured executive_summary as paragraph if LLM generation succeeded
+  const paragraph = structuredGeneration.model
+    ? structuredGeneration.executive_summary
+    : generation.paragraph;
 
   const sourcesUsed = {
     narrative_policy_version: NARRATIVE_POLICY_VERSION,
@@ -1088,6 +1127,8 @@ export async function refreshCurrentStateBrief(opts?: { forceRegenerate?: boolea
       reliability: row.reliability,
       validation_state: row.validation_state,
       priority: row.priority,
+      trust_tier: row.trust_tier,
+      confidence_label: row.confidence_label,
       fetched_at: row.fetched_at,
       stale: row.stale,
     })),
@@ -1103,11 +1144,12 @@ export async function refreshCurrentStateBrief(opts?: { forceRegenerate?: boolea
 
   const upsertPayload = {
     key: BRIEF_KEY,
-    paragraph: generation.paragraph,
+    paragraph,
+    sections: structuredGeneration.sections,
     input_hash: hash,
     generated_at: generatedAt,
     refreshed_at: nowIso,
-    model: generation.model,
+    model: structuredGeneration.model ?? generation.model,
     freshness_state: context.freshness_state,
     confidence: context.confidence,
     flight_summary: {

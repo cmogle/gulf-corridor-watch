@@ -1,4 +1,5 @@
-import { UnifiedQuery } from "./unified-query";
+import { ChatPanel } from "./chat-panel";
+import { SessionIndicator } from "./session-indicator";
 
 type AirspacePosture = "normal" | "heightened" | "unclear";
 
@@ -11,6 +12,7 @@ type StatusHeroProps = {
   updatedAt: string | null;
   sourceCount: number;
   suggestedPrompts: string[];
+  trend: "improving" | "worsening" | "stable" | null;
 };
 
 function PostureDot({ posture }: { posture: AirspacePosture }) {
@@ -55,6 +57,22 @@ function relativeTime(iso: string | null): string {
   return `${hours} hours ago`;
 }
 
+function TrendIndicator({ trend }: { trend: StatusHeroProps["trend"] }) {
+  if (!trend) return null;
+  const config = {
+    improving: { arrow: "\u2193", label: "Improving", color: "text-[var(--green)]" },
+    worsening: { arrow: "\u2191", label: "Worsening", color: "text-[var(--red)]" },
+    stable: { arrow: "\u2014", label: "Stable", color: "text-[var(--text-on-dark-muted)]" },
+  } as const;
+  const { arrow, label, color } = config[trend];
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-xs font-medium ${color}`}>
+      <span className="text-sm">{arrow}</span>
+      {label}
+    </span>
+  );
+}
+
 export function StatusHero({
   posture,
   flightTotal,
@@ -63,18 +81,23 @@ export function StatusHero({
   updatedAt,
   sourceCount,
   suggestedPrompts,
+  trend,
 }: StatusHeroProps) {
   return (
     <section className={`${heroBackground(posture)} px-4 py-8 md:px-8 md:py-12`}>
       <div className="mx-auto max-w-3xl space-y-6">
-        <p className="text-[13px] font-medium uppercase tracking-[0.15em] text-[var(--text-on-dark-muted)]">
-          keep calm &amp; carry on
-        </p>
+        <div className="flex items-center justify-between">
+          <p className="text-[13px] font-medium uppercase tracking-[0.15em] text-[var(--text-on-dark-muted)]">
+            keep calm &amp; carry on
+          </p>
+          <SessionIndicator />
+        </div>
 
         <div className="space-y-2">
           <h1 className="flex items-center gap-3 font-serif text-3xl text-[var(--text-on-dark)] md:text-4xl">
             <PostureDot posture={posture} />
             {postureHeadline(posture)}
+            <TrendIndicator trend={trend} />
           </h1>
           <p className="text-[15px] text-[var(--text-on-dark-muted)]">
             {postureSubtitle(posture)}
@@ -91,7 +114,7 @@ export function StatusHero({
           </span>
         </div>
 
-        <UnifiedQuery suggestedPrompts={suggestedPrompts} variant="hero" />
+        <ChatPanel suggestedPrompts={suggestedPrompts} variant="hero" />
 
         <p className="text-xs text-[var(--text-on-dark-muted)]">
           Updated {relativeTime(updatedAt)} · {sourceCount} sources reporting

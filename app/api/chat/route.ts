@@ -1,29 +1,38 @@
-import { generateText, hasAnthropicKey, extractClaudeUsage } from "@/lib/anthropic";
+import { generateText, streamText, hasAnthropicKey, extractClaudeUsage } from "@/lib/anthropic";
 import { flightsToContextRows, parseFlightIntent, runFlightQuery } from "@/lib/flight-query";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { gateSnapshotContext, gateSocialContext, getContextGatingConfig } from "@/lib/context-gating";
 import { logLlmTelemetry } from "@/lib/llm-telemetry";
+import { optionalAuth } from "@/lib/auth";
+import {
+  CHAT_SYSTEM_PROMPT,
+  buildSituationContext,
+  buildUserContext,
+  buildRouteIntelligence,
+  loadConversationHistory,
+  createChatSession,
+  storeChatMessage,
+} from "@/lib/chat-context";
 
 const CHAT_MODEL = "claude-sonnet-4-6";
+const ANON_RATE_LIMIT = 5;
+const ANON_COOKIE_NAME = "gcw_anon_chat_count";
 
-type SocialContextRow = {
-  linked_source_id: string;
-  handle: string;
-  posted_at: string;
-  url: string;
-  text_original: string | null;
-  text_en: string | null;
-  language_original: string | null;
-  translation_status: "not_needed" | "translated" | "failed";
-  text: string | null;
-  confidence: number | null;
-  validation_state: "validated" | "unvalidated" | "failed" | "skipped";
-};
+function getAnonCount(req: Request): number {
+  const cookie = req.headers.get("cookie") ?? "";
+  const match = cookie.match(new RegExp(`${ANON_COOKIE_NAME}=(\\d+)`));
+  return match ? parseInt(match[1], 10) : 0;
+}
 
 export async function POST(req: Request) {
   const startedAt = Date.now();
   try {
-    const { question } = await req.json();
+    const body = await req.json();
+    const { question, session_id: requestedSessionId, stream: useStreaming } = body as {
+      question?: string;
+      session_id?: string;
+      stream?: boolean;
+    };
+
     if (!question) return Response.json({ ok: false, error: "Missing question" }, { status: 400 });
 
     if (!hasAnthropicKey()) {
@@ -36,29 +45,80 @@ export async function POST(req: Request) {
       return Response.json({ ok: false, error: "Missing ANTHROPIC_API_KEY" }, { status: 500 });
     }
 
+    // Optional auth — get user if token present
+    const user = await optionalAuth(req);
+    const userId = user?.id ?? null;
+
+    // Anonymous rate limiting
+    if (!userId) {
+      const anonCount = getAnonCount(req);
+      if (anonCount >= ANON_RATE_LIMIT) {
+        return Response.json(
+          {
+            ok: false,
+            limit_reached: true,
+            message: "You've reached the free message limit. Sign up for unlimited chat.",
+            remaining: 0,
+          },
+          {
+            status: 429,
+            headers: { "Set-Cookie": `${ANON_COOKIE_NAME}=${anonCount}; Path=/; SameSite=Lax; Max-Age=86400` },
+          },
+        );
+      }
+    }
+
+    // Track anonymous usage for rate limiting
+    const anonCount = userId ? 0 : getAnonCount(req);
+    const newAnonCount = anonCount + 1;
+    const anonCookieHeader: Record<string, string> = !userId
+      ? { "Set-Cookie": `${ANON_COOKIE_NAME}=${newAnonCount}; Path=/; SameSite=Lax; Max-Age=86400` }
+      : {};
+    const remaining = userId ? null : Math.max(0, ANON_RATE_LIMIT - newAnonCount);
+
     const supabase = getSupabaseAdmin();
     const flightIntent = parseFlightIntent(question);
-    const gating = getContextGatingConfig();
 
+    // Flight intent shortcut (stateless, fast path)
     if (flightIntent.type !== "unknown") {
-      const result = await runFlightQuery(question, { allowLive: false });
+      const [result, routeIntel, situationContext] = await Promise.all([
+        runFlightQuery(question, { allowLive: false }),
+        buildRouteIntelligence(flightIntent),
+        buildSituationContext(),
+      ]);
       const context = flightsToContextRows(result.flights).join("\n\n");
+
+      const flightSystemPrompt = `${CHAT_SYSTEM_PROMPT}
+
+You are also a flight operations specialist. For this query, you have flight-specific data and route intelligence below. Synthesize carrier status, suspension information, airspace status, and flight observations into a direct, comprehensive answer. Include alternatives if the primary carrier is suspended.`;
+
       const llmResult = await generateText({
         model: CHAT_MODEL,
         temperature: 0.1,
-        system:
-          "You are a flight operations assistant. Answer only from provided flight data and insight summary. If data is missing or stale, say so clearly. Always include the latest fetched timestamp.",
-        userMessage: `Question: ${question}
+        system: flightSystemPrompt,
+        userMessage: `${situationContext}
 
+${routeIntel}
+
+=== FLIGHT DATA ===
 Summary: total=${result.summary.total}, delayed=${result.summary.delayed}, cancelled=${result.summary.cancelled}, latest_fetch=${result.summary.latest_fetch ?? "n/a"}
 Insight: ${result.insight ? `${result.insight.headline} | ${result.insight.summary} | confidence=${result.insight.confidence} | score=${result.insight.score ?? "n/a"}` : "n/a"}
 
-Flight data context:
-${context || "No matching flights found."}`,
+Flight data:
+${context || "No matching flights found."}
+
+Question: ${question}`,
       });
 
       const answer = llmResult.text || "No answer";
       const usage = extractClaudeUsage(llmResult);
+
+      // Store in session if one exists
+      if (requestedSessionId) {
+        await storeChatMessage(requestedSessionId, "user", question);
+        await storeChatMessage(requestedSessionId, "assistant", answer);
+      }
+
       await supabase.from("chat_logs").insert({ question, answer });
       logLlmTelemetry("chat_response", {
         route: "/api/chat",
@@ -74,152 +134,148 @@ ${context || "No matching flights found."}`,
           cancelled: result.summary.cancelled,
           latest_fetch: result.summary.latest_fetch,
           source: result.source,
+          session_id: requestedSessionId,
+          authenticated: !!userId,
         },
       });
-      return Response.json({ ok: true, answer, mode: "flight_query", summary: result.summary });
+      return Response.json(
+        {
+          ok: true,
+          answer,
+          mode: "flight_query",
+          summary: result.summary,
+          session_id: requestedSessionId,
+          ...(remaining != null ? { remaining } : {}),
+        },
+        { headers: anonCookieHeader },
+      );
     }
 
-    const snapshotSelect =
-      "source_id, source_name, source_url, fetched_at, published_at, title, summary, status_level, reliability, validation_state, freshness_target_minutes, priority";
-    const legacySnapshotSelect = "source_id, source_name, source_url, fetched_at, published_at, title, summary, status_level, reliability, freshness_target_minutes, priority";
-    let { data, error } = await supabase.from("latest_source_snapshots").select(snapshotSelect).limit(80);
-    if (error && /validation_state|content_hash|validated_at/i.test(error.message ?? "")) {
-      const legacy = await supabase.from("latest_source_snapshots").select(legacySnapshotSelect).limit(80);
-      data = (legacy.data ?? []).map((row) => ({ ...row, validation_state: "unvalidated" }));
-      error = legacy.error;
-    }
-    if (error) throw error;
-
-    const socialSelect =
-      "linked_source_id,handle,posted_at,url,text_original,text_en,language_original,translation_status,text,confidence,validation_state";
-    const legacySocialSelect = "linked_source_id,handle,posted_at,url,text_original,text_en,language_original,translation_status,text,confidence";
-    let { data: socialData, error: socialError } = await supabase
-      .from("social_signals")
-      .select(socialSelect)
-      .eq("provider", "x")
-      .order("posted_at", { ascending: false })
-      .limit(60);
-    if (socialError && /validation_state/i.test(socialError.message ?? "")) {
-      const legacy = await supabase.from("social_signals").select(legacySocialSelect).eq("provider", "x").order("posted_at", { ascending: false }).limit(60);
-      socialData = (legacy.data ?? []).map((row) => ({ ...row, validation_state: "unvalidated" }));
-      socialError = legacy.error;
-    }
-    if (socialError) throw socialError;
-
-    const latestSocialBySource = new Map<string, SocialContextRow>();
-    for (const row of ((socialData ?? []) as SocialContextRow[])) {
-      if (!latestSocialBySource.has(row.linked_source_id)) latestSocialBySource.set(row.linked_source_id, row);
+    // Multi-turn conversation path
+    // 1. Session management
+    let sessionId = requestedSessionId ?? null;
+    if (!sessionId && userId) {
+      // Create a new session for authenticated users
+      sessionId = await createChatSession(userId);
     }
 
-    const snapshotGate = gateSnapshotContext(
-      ((data ?? []) as Array<{
-        source_id: string;
-        source_name: string;
-        source_url: string;
-        fetched_at: string;
-        published_at: string | null;
-        title: string | null;
-        summary: string | null;
-        status_level: string;
-        reliability: string;
-        validation_state: string;
-        freshness_target_minutes: number | null;
-        priority: number | null;
-      }>).map((row) => ({
-        source_id: row.source_id,
-        source_name: row.source_name,
-        title: row.title ?? "",
-        summary: row.summary ?? "",
-        reliability: row.reliability === "blocked" || row.reliability === "degraded" || row.reliability === "reliable" ? row.reliability : "degraded",
-        fetched_at: row.fetched_at,
-        freshness_target_minutes: Number(row.freshness_target_minutes ?? 15) || 15,
-        validation_state:
-          row.validation_state === "validated" || row.validation_state === "unvalidated" || row.validation_state === "failed" || row.validation_state === "skipped"
-            ? row.validation_state
-            : "unvalidated",
-        priority: Number(row.priority ?? 0) || 0,
-      })),
-      {
-        maxAgeMinutes: gating.source_max_age_minutes,
-        minFreshMinutes: gating.source_min_fresh_minutes,
-        freshnessMultiplier: gating.source_freshness_multiplier,
-        maxRows: gating.source_max_rows,
-      },
-    );
+    // 2. Load conversation history
+    const history = sessionId ? await loadConversationHistory(sessionId) : [];
 
-    const snapshotRows = (data ?? []) as Array<{
-      source_id: string;
-      source_name: string;
-      source_url: string;
-      fetched_at: string;
-      published_at: string | null;
-      title: string | null;
-      summary: string | null;
-      status_level: string;
-    }>;
-    const snapshotById = new Map(snapshotRows.map((row) => [row.source_id, row]));
-    const selectedSnapshots = snapshotGate.selected
-      .map((row) => snapshotById.get(row.source_id))
-      .filter((row): row is (typeof snapshotRows)[number] => Boolean(row));
+    // 3. Build situation context
+    const [situationContext, userContext] = await Promise.all([
+      buildSituationContext(),
+      buildUserContext(userId),
+    ]);
 
-    const context = selectedSnapshots
-      .map(
-        (d) =>
-          `[${d.source_name}] status=${d.status_level} fetched=${d.fetched_at} published=${d.published_at ?? "n/a"}\nTitle: ${d.title}\nSummary: ${d.summary}\nURL: ${d.source_url}`
-      )
-      .join("\n\n");
+    const fullContext = [situationContext, userContext].filter(Boolean).join("\n\n");
 
-    const socialGate = gateSocialContext(Array.from(latestSocialBySource.values()), {
-      maxAgeMinutes: gating.social_max_age_minutes,
-      maxRows: gating.social_max_rows,
-    });
+    // 4. Build message array for Claude
+    const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
 
-    const socialContext = socialGate.selected
-      .map((s) => {
-        const display = s.text_en ?? s.text_original ?? "";
-        const original = s.translation_status === "translated" ? `\nOriginal (${s.language_original ?? "unknown"}): ${s.text_original}` : "";
-        return `[X @${s.handle}] posted=${s.posted_at} status=${s.translation_status}\nText: ${display}${original}\nURL: ${s.url}`;
-      })
-      .join("\n\n");
+    // Add conversation history
+    for (const msg of history) {
+      messages.push({ role: msg.role, content: msg.content });
+    }
 
+    // Add current question with situation context
+    const userMessage = `${fullContext}
+
+Question: ${question}`;
+    messages.push({ role: "user", content: userMessage });
+
+    // 5. Store user message
+    if (sessionId) {
+      await storeChatMessage(sessionId, "user", question);
+    }
+
+    // 6. Generate response (streaming or non-streaming)
+    if (useStreaming) {
+      const { stream, response: responsePromise } = streamText({
+        model: CHAT_MODEL,
+        temperature: 0.1,
+        system: CHAT_SYSTEM_PROMPT,
+        messages,
+        maxTokens: 2048,
+      });
+
+      // Store the response async after streaming completes
+      responsePromise.then(async (result) => {
+        if (sessionId && result.text) {
+          await storeChatMessage(sessionId, "assistant", result.text);
+        }
+        await supabase.from("chat_logs").insert({ question, answer: result.text });
+        const usage = extractClaudeUsage(result);
+        logLlmTelemetry("chat_response", {
+          route: "/api/chat",
+          mode: "multi_turn_stream",
+          model: CHAT_MODEL,
+          success: true,
+          duration_ms: Date.now() - startedAt,
+          ...usage,
+          context: {
+            question_length: question.length,
+            history_messages: history.length,
+            session_id: sessionId,
+            authenticated: !!userId,
+          },
+        });
+      }).catch(() => {});
+
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+          "X-Session-Id": sessionId ?? "",
+          ...(remaining != null ? { "X-Remaining": String(remaining) } : {}),
+          ...anonCookieHeader,
+        },
+      });
+    }
+
+    // Non-streaming fallback
     const llmResult = await generateText({
       model: CHAT_MODEL,
       temperature: 0.1,
-      system:
-        "You are a travel disruption assistant. Answer only from provided official-source and official-X context. If unknown or stale, say so clearly. Always include source citations with URLs and fetched timestamps. Treat X posts as supplementary signal, not sole authority.",
-      userMessage: `Question: ${question}\n\nOfficial source context:\n${context || "No usable official source context is currently available."}\n\nOfficial X context:\n${socialContext || "No official X posts available."}`,
+      maxTokens: 2048,
+      system: CHAT_SYSTEM_PROMPT,
+      userMessage: messages.map((m) => `${m.role}: ${m.content}`).join("\n\n"),
     });
 
     const answer = llmResult.text || "No answer";
     const usage = extractClaudeUsage(llmResult);
 
+    // Store assistant response
+    if (sessionId) {
+      await storeChatMessage(sessionId, "assistant", answer);
+    }
+
     await supabase.from("chat_logs").insert({ question, answer });
     logLlmTelemetry("chat_response", {
       route: "/api/chat",
-      mode: "official_sources",
+      mode: "multi_turn",
       model: CHAT_MODEL,
       success: true,
       duration_ms: Date.now() - startedAt,
       ...usage,
-      fallback_reason: snapshotGate.summary.selected === 0 ? "no_usable_snapshot_context" : null,
       context: {
         question_length: question.length,
-        source_context_rows: selectedSnapshots.length,
-        source_policy: snapshotGate.summary.policy,
-        source_total: snapshotGate.summary.total,
-        source_usable: snapshotGate.summary.usable,
-        source_fresh: snapshotGate.summary.fresh,
-        source_validated_or_skipped: snapshotGate.summary.validated_or_skipped,
-        source_unvalidated: snapshotGate.summary.unvalidated,
-        source_failed: snapshotGate.summary.failed,
-        social_context_rows: socialGate.summary.selected,
-        social_policy: socialGate.summary.policy,
-        social_total: socialGate.summary.total,
-        social_fresh: socialGate.summary.fresh,
+        history_messages: history.length,
+        session_id: sessionId,
+        authenticated: !!userId,
       },
     });
 
-    return Response.json({ ok: true, answer });
+    return Response.json(
+      {
+        ok: true,
+        answer,
+        session_id: sessionId,
+        ...(remaining != null ? { remaining } : {}),
+      },
+      { headers: anonCookieHeader },
+    );
   } catch (error) {
     logLlmTelemetry("chat_response", {
       route: "/api/chat",

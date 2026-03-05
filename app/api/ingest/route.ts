@@ -6,6 +6,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { ingestAirports, type AirportCode } from "@/lib/flightradar";
 import { ingestAirportsOpenSky } from "@/lib/opensky";
 import { isCronAuthorized } from "@/lib/cron-auth";
+import { detectCrisisEvent } from "@/lib/crisis-detection";
 
 const AIRPORTS: AirportCode[] = ["DXB", "AUH"];
 
@@ -64,11 +65,28 @@ export async function GET(req: Request) {
         (scope === "airline" || scope === "full") ? ingestFlights() : Promise.resolve(null),
       ]);
 
-      return Response.json({ ...feedResult, ...flightResult });
+      // Post-ingestion: check for crisis conditions
+      let crisis_event_created: string | null = null;
+      try {
+        crisis_event_created = await detectCrisisEvent();
+      } catch {
+        // Crisis detection is non-critical
+      }
+
+      return Response.json({ ...feedResult, ...flightResult, crisis_event_created });
     }
 
     const result = await runIngestion({ scope });
-    return Response.json({ ok: true, ...result });
+
+    // Post-ingestion: check for crisis conditions
+    let crisis_event_created: string | null = null;
+    try {
+      crisis_event_created = await detectCrisisEvent();
+    } catch {
+      // Crisis detection is non-critical
+    }
+
+    return Response.json({ ok: true, ...result, crisis_event_created });
   } catch (error) {
     return Response.json({ ok: false, error: String(error) }, { status: 500 });
   }

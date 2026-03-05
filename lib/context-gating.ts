@@ -80,9 +80,9 @@ export function getContextGatingConfig() {
     source_max_age_minutes: parsePositiveInt(process.env.GPT_CONTEXT_MAX_SOURCE_AGE_MINUTES, 180),
     source_min_fresh_minutes: parsePositiveInt(process.env.GPT_CONTEXT_MIN_FRESHNESS_MINUTES, 30),
     source_freshness_multiplier: parsePositiveInt(process.env.GPT_CONTEXT_FRESHNESS_MULTIPLIER, 3),
-    source_max_rows: parsePositiveInt(process.env.GPT_CONTEXT_MAX_SOURCES, 12),
+    source_max_rows: parsePositiveInt(process.env.GPT_CONTEXT_MAX_SOURCES, 24),
     social_max_age_minutes: parsePositiveInt(process.env.GPT_CONTEXT_MAX_SOCIAL_AGE_MINUTES, 240),
-    social_max_rows: parsePositiveInt(process.env.GPT_CONTEXT_MAX_SOCIAL, 8),
+    social_max_rows: parsePositiveInt(process.env.GPT_CONTEXT_MAX_SOCIAL, 16),
   };
 }
 

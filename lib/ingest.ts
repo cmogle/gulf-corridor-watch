@@ -835,11 +835,33 @@ export async function runIngestion(opts?: { scope?: IngestScope }) {
     }
   }
 
+  // Evaluate regeneration triggers before refreshing the brief
+  let triggerResult: { should_regenerate: boolean; reasons: string[]; details: string[]; rate_limited: boolean } | null = null;
+  try {
+    const { evaluateBriefTriggers } = await import("./brief-triggers");
+    const currentSnapshots = results
+      .filter((r) => r.reliability !== "degraded" && !r.error)
+      .map((r) => {
+        const source = sources.find((s) => s.id === r.source_id);
+        return { source_id: r.source_id, status_level: source ? "normal" : "unknown" };
+      });
+    // Get flight totals from recent observations
+    const flightTotals = { total: flightCount, delayed: 0, cancelled: 0 };
+    triggerResult = await evaluateBriefTriggers(currentSnapshots, flightTotals);
+  } catch {
+    // Trigger evaluation failure should not block brief refresh
+  }
+
   try {
     const { refreshCurrentStateBrief } = await import("./current-state-brief");
+    // Always attempt refresh (hash-gating inside will prevent unnecessary LLM calls)
+    // but log trigger context for observability
     const refresh = await refreshCurrentStateBrief();
     briefRegenerated = refresh.regenerated;
     briefReason = refresh.reason;
+    if (triggerResult?.should_regenerate && !briefRegenerated) {
+      briefReason = `Trigger fired (${triggerResult.reasons.join(", ")}) but hash-gating prevented regeneration`;
+    }
   } catch (error) {
     briefError = String(error);
   }
@@ -857,6 +879,7 @@ export async function runIngestion(opts?: { scope?: IngestScope }) {
     brief_regenerated: briefRegenerated,
     brief_reason: briefReason,
     brief_error: briefError,
+    brief_triggers: triggerResult ? { reasons: triggerResult.reasons, details: triggerResult.details, rate_limited: triggerResult.rate_limited } : null,
     x_min_poll_minutes: getXPollIntervalMinutes(),
     validation_runs: validationRuns,
     validation_budget: validationBudget,

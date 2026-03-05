@@ -1,5 +1,5 @@
 import { SourceDef } from "./sources";
-import OpenAI from "openai";
+import { generateText, hasAnthropicKey } from "./anthropic";
 
 type XPost = {
   id: string;
@@ -15,7 +15,7 @@ export type SocialSignal = {
   text_original: string;
   language_original: string | null;
   text_en: string | null;
-  translation_provider: "openai" | null;
+  translation_provider: "anthropic" | "openai" | null;
   translation_confidence: number | null;
   translation_status: "not_needed" | "translated" | "failed";
   text: string;
@@ -134,29 +134,16 @@ function detectLanguage(text: string): string {
   return "unknown";
 }
 
-async function translateWithTimeout(client: OpenAI, text: string, timeoutMs = 8000): Promise<string> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const completion = await client.chat.completions.create(
-      {
-        model: "gpt-4o-mini",
-        temperature: 0,
-        messages: [
-          {
-            role: "system",
-            content:
-              "Translate to concise operational English. Preserve named entities, flight numbers, timestamps, and warning tone. Return only the translated text.",
-          },
-          { role: "user", content: text },
-        ],
-      },
-      { signal: controller.signal },
-    );
-    return completion.choices[0]?.message?.content?.trim() || "";
-  } finally {
-    clearTimeout(timer);
-  }
+async function translateWithTimeout(text: string, timeoutMs = 8000): Promise<string> {
+  const result = await generateText({
+    model: "claude-sonnet-4-6",
+    temperature: 0,
+    timeoutMs,
+    system:
+      "Translate to concise operational English. Preserve named entities, flight numbers, timestamps, and warning tone. Return only the translated text.",
+    userMessage: text,
+  });
+  return result.text.trim();
 }
 
 async function maybeTranslate(text: string): Promise<{
@@ -177,8 +164,7 @@ async function maybeTranslate(text: string): Promise<{
     };
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
+  if (!hasAnthropicKey()) {
     return {
       text_en: null,
       language_original: language,
@@ -188,16 +174,15 @@ async function maybeTranslate(text: string): Promise<{
     };
   }
 
-  const client = new OpenAI({ apiKey });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const translated = await translateWithTimeout(client, text);
+      const translated = await translateWithTimeout(text);
       if (translated) {
         return {
           text_en: translated,
           language_original: language,
           translation_status: "translated",
-          translation_provider: "openai",
+          translation_provider: "anthropic",
           translation_confidence: 0.9,
         };
       }
@@ -210,7 +195,7 @@ async function maybeTranslate(text: string): Promise<{
     text_en: null,
     language_original: language,
     translation_status: "failed",
-    translation_provider: "openai",
+    translation_provider: "anthropic",
     translation_confidence: null,
   };
 }

@@ -1,8 +1,8 @@
-import OpenAI from "openai";
+import { generateText, hasAnthropicKey } from "./anthropic";
 
 export const LLM_EXTRACT_MAX_PER_CYCLE = 5;
 
-const EXTRACTION_MODEL = "gpt-4o-mini";
+const EXTRACTION_MODEL = "claude-sonnet-4-6";
 
 export function buildExtractionPrompt(sourceName: string, pageText: string): string {
   const truncated = pageText.slice(0, 4000);
@@ -28,19 +28,17 @@ export async function llmExtractSummary(
   sourceName: string,
   pageText: string,
 ): Promise<string | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
+  if (!hasAnthropicKey()) return null;
 
-  const client = new OpenAI({ apiKey });
   const prompt = buildExtractionPrompt(sourceName, pageText);
 
-  const response = await client.chat.completions.create({
+  const result = await generateText({
     model: EXTRACTION_MODEL,
-    messages: [{ role: "user", content: prompt }],
-    max_tokens: 300,
     temperature: 0.2,
+    maxTokens: 300,
+    system: "You extract actionable travel news from web pages. Follow the user instructions exactly.",
+    userMessage: prompt,
   });
 
-  const text = response.choices?.[0]?.message?.content ?? "";
-  return parseExtractionResponse(text);
+  return parseExtractionResponse(result.text);
 }

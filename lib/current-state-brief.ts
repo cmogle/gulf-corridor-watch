@@ -1,10 +1,10 @@
 import { createHash } from "crypto";
-import OpenAI from "openai";
+import { generateText, hasAnthropicKey, extractClaudeUsage } from "./anthropic";
 import { gateSnapshotContext, gateSocialContext, getContextGatingConfig, type ContextGateSummary } from "./context-gating";
-import { extractUsage, logLlmTelemetry } from "./llm-telemetry";
+import { logLlmTelemetry } from "./llm-telemetry";
 
 const BRIEF_KEY = "global";
-const DEFAULT_MODEL = "gpt-4o-mini";
+const DEFAULT_MODEL = "claude-sonnet-4-6";
 const DEFAULT_TIMEOUT_MS = 8000;
 const EXPECTED_MISSING_SOURCES = ["india_consulate_dubai", "india_embassy_abu_dhabi", "broader_mena_ministries"];
 export const NARRATIVE_POLICY_VERSION = "v5_uae_airspace_sitrep_regional_instability";
@@ -848,15 +848,14 @@ async function generateBriefParagraphWithModel(
     };
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
+  if (!hasAnthropicKey()) {
     logLlmTelemetry("brief_generation", {
       route: "/api/brief/refresh",
       mode: "current_state_brief",
       model: null,
       success: false,
       duration_ms: Date.now() - startedAt,
-      fallback_reason: "missing_openai_api_key",
+      fallback_reason: "missing_anthropic_api_key",
       context: {
         source_rows: context.sources.length,
         social_rows: context.social_signals.length,
@@ -865,7 +864,7 @@ async function generateBriefParagraphWithModel(
     return {
       paragraph: fallbackParagraph,
       model: null,
-      fallback_reason: "missing_openai_api_key",
+      fallback_reason: "missing_anthropic_api_key",
       prompt_tokens: null,
       completion_tokens: null,
       total_tokens: null,
@@ -875,9 +874,6 @@ async function generateBriefParagraphWithModel(
 
   const timeoutMs = parsePositiveInt(process.env.CURRENT_STATE_BRIEF_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
   const model = process.env.CURRENT_STATE_BRIEF_MODEL?.trim() || DEFAULT_MODEL;
-  const client = new OpenAI({ apiKey });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const advisoryRows = context.sources
@@ -889,42 +885,32 @@ async function generateBriefParagraphWithModel(
         fetched_at: row.fetched_at,
         summary: compact(`${row.title}. ${row.summary}`, 180),
       }));
-    const completion = await client.chat.completions.create(
-      {
-        model,
-        temperature: 0.1,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You write a UAE resident airspace situation brief. Output strict JSON only: {\"paragraph\": string}. Requirements: one concise English paragraph (90-140 words) structured as posture, confirmed signals, unknowns, and practical implication. Use only provided snippets; no speculation and no invented facts. Keep operational flight counts if available. Mention official X only when corroborated_social_rows are provided. Do not include source/feed quantification.",
-          },
-          {
-            role: "user",
-            content: JSON.stringify(
-              {
-                narrative_policy_version: NARRATIVE_POLICY_VERSION,
-                timestamp_gst: formatDubaiTime(context.computed_at),
-                flight: context.flight,
-                source_evidence_rows: basis.source_evidence_rows,
-                corroborated_social_rows: basis.corroborated_social_rows,
-                freshness_caveat_required: basis.freshness_caveat_required,
-                advisory_rows: advisoryRows,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      },
-      { signal: controller.signal },
-    );
+    const result = await generateText({
+      model,
+      temperature: 0.1,
+      timeoutMs,
+      system:
+        "You write a UAE resident airspace situation brief. Output strict JSON only: {\"paragraph\": string}. Requirements: one concise English paragraph (90-140 words) structured as posture, confirmed signals, unknowns, and practical implication. Use only provided snippets; no speculation and no invented facts. Keep operational flight counts if available. Mention official X only when corroborated_social_rows are provided. Do not include source/feed quantification.",
+      userMessage: JSON.stringify(
+        {
+          narrative_policy_version: NARRATIVE_POLICY_VERSION,
+          timestamp_gst: formatDubaiTime(context.computed_at),
+          flight: context.flight,
+          source_evidence_rows: basis.source_evidence_rows,
+          corroborated_social_rows: basis.corroborated_social_rows,
+          freshness_caveat_required: basis.freshness_caveat_required,
+          advisory_rows: advisoryRows,
+        },
+        null,
+        2,
+      ),
+    });
 
-    const content = completion.choices[0]?.message?.content ?? "";
+    const content = result.text;
     const parsed = JSON.parse(extractBriefJsonObject(content)) as { paragraph?: unknown };
     const paragraph = typeof parsed.paragraph === "string" ? compact(parsed.paragraph, 1200) : "";
     if (!paragraph) {
-      const usage = extractUsage(completion.usage);
+      const usage = extractClaudeUsage(result);
       logLlmTelemetry("brief_generation", {
         route: "/api/brief/refresh",
         mode: "current_state_brief",
@@ -944,7 +930,7 @@ async function generateBriefParagraphWithModel(
     }
 
     if (!isNarrativePolicyCompliant(paragraph, { allowXMention: basis.corroborated_social_rows.length > 0 })) {
-      const usage = extractUsage(completion.usage);
+      const usage = extractClaudeUsage(result);
       logLlmTelemetry("brief_generation", {
         route: "/api/brief/refresh",
         mode: "current_state_brief",
@@ -963,7 +949,7 @@ async function generateBriefParagraphWithModel(
       };
     }
 
-    const usage = extractUsage(completion.usage);
+    const usage = extractClaudeUsage(result);
     logLlmTelemetry("brief_generation", {
       route: "/api/brief/refresh",
       mode: "current_state_brief",
@@ -1012,8 +998,6 @@ async function generateBriefParagraphWithModel(
       total_tokens: null,
       duration_ms: Date.now() - startedAt,
     };
-  } finally {
-    clearTimeout(timer);
   }
 }
 

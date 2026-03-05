@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import { generateText, hasAnthropicKey } from "./anthropic";
 import { EXPERT_ACCOUNTS, findGulfKeywords, scoreRelevance } from "./expert-feed";
 import type { ExpertSignal, ExpertCategory } from "./expert-feed";
 import {
@@ -78,25 +78,17 @@ export function buildRelevanceResult(text: string): {
 }
 
 async function llmScoreRelevance(text: string): Promise<number> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return 0;
+  if (!hasAnthropicKey()) return 0;
   try {
-    const client = new OpenAI({ apiKey });
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+    const result = await generateText({
+      model: "claude-sonnet-4-6",
       temperature: 0,
-      max_tokens: 10,
-      messages: [
-        {
-          role: "system",
-          content:
-            "Rate the relevance of this tweet to the Iran conflict, Gulf shipping/aviation disruption, or UAE travel safety. Reply with ONLY a number between 0.0 and 1.0.",
-        },
-        { role: "user", content: text.slice(0, 500) },
-      ],
+      maxTokens: 10,
+      system:
+        "Rate the relevance of this tweet to the Iran conflict, Gulf shipping/aviation disruption, or UAE travel safety. Reply with ONLY a number between 0.0 and 1.0.",
+      userMessage: text.slice(0, 500),
     });
-    const raw = completion.choices[0]?.message?.content?.trim() ?? "0";
-    const score = parseFloat(raw);
+    const score = parseFloat(result.text.trim());
     return Number.isFinite(score) ? Math.min(1, Math.max(0, score)) : 0;
   } catch {
     return 0;
@@ -106,8 +98,7 @@ async function llmScoreRelevance(text: string): Promise<number> {
 // --- Digest generation ---
 
 async function generateDigest(signals: ExpertSignal[]): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey || signals.length === 0) return "";
+  if (!hasAnthropicKey() || signals.length === 0) return "";
 
   const signalTexts = signals
     .slice(0, 15)
@@ -115,21 +106,15 @@ async function generateDigest(signals: ExpertSignal[]): Promise<string> {
     .join("\n");
 
   try {
-    const client = new OpenAI({ apiKey });
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+    const result = await generateText({
+      model: "claude-sonnet-4-6",
       temperature: 0.3,
-      max_tokens: 300,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a crisis monitoring analyst. Summarize the following expert commentary tweets into a concise 2-4 sentence digest for UAE travelers/residents monitoring the Iran situation. Group by theme (maritime, defense, energy, aviation) if signals span multiple domains. Cite authors by @handle. Focus on actionable intelligence and emerging developments. Do not editorialize.",
-        },
-        { role: "user", content: signalTexts },
-      ],
+      maxTokens: 300,
+      system:
+        "You are a crisis monitoring analyst. Summarize the following expert commentary tweets into a concise 2-4 sentence digest for UAE travelers/residents monitoring the Iran situation. Group by theme (maritime, defense, energy, aviation) if signals span multiple domains. Cite authors by @handle. Focus on actionable intelligence and emerging developments. Do not editorialize.",
+      userMessage: signalTexts,
     });
-    return completion.choices[0]?.message?.content?.trim() ?? "";
+    return result.text.trim();
   } catch {
     return "";
   }

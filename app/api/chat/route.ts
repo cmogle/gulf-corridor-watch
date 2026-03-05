@@ -1,8 +1,10 @@
-import OpenAI from "openai";
+import { generateText, hasAnthropicKey, extractClaudeUsage } from "@/lib/anthropic";
 import { flightsToContextRows, parseFlightIntent, runFlightQuery } from "@/lib/flight-query";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { gateSnapshotContext, gateSocialContext, getContextGatingConfig } from "@/lib/context-gating";
-import { extractUsage, logLlmTelemetry } from "@/lib/llm-telemetry";
+import { logLlmTelemetry } from "@/lib/llm-telemetry";
+
+const CHAT_MODEL = "claude-sonnet-4-6";
 
 type SocialContextRow = {
   linked_source_id: string;
@@ -24,54 +26,44 @@ export async function POST(req: Request) {
     const { question } = await req.json();
     if (!question) return Response.json({ ok: false, error: "Missing question" }, { status: 400 });
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
+    if (!hasAnthropicKey()) {
       logLlmTelemetry("chat_response", {
         route: "/api/chat",
         success: false,
         duration_ms: Date.now() - startedAt,
-        error: "Missing OPENAI_API_KEY",
+        error: "Missing ANTHROPIC_API_KEY",
       });
-      return Response.json({ ok: false, error: "Missing OPENAI_API_KEY" }, { status: 500 });
+      return Response.json({ ok: false, error: "Missing ANTHROPIC_API_KEY" }, { status: 500 });
     }
 
     const supabase = getSupabaseAdmin();
     const flightIntent = parseFlightIntent(question);
-    const client = new OpenAI({ apiKey });
     const gating = getContextGatingConfig();
 
     if (flightIntent.type !== "unknown") {
       const result = await runFlightQuery(question, { allowLive: false });
       const context = flightsToContextRows(result.flights).join("\n\n");
-      const completion = await client.chat.completions.create({
-        model: "gpt-4o-mini",
+      const llmResult = await generateText({
+        model: CHAT_MODEL,
         temperature: 0.1,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a flight operations assistant. Answer only from provided flight data and insight summary. If data is missing or stale, say so clearly. Always include the latest fetched timestamp.",
-          },
-          {
-            role: "user",
-            content: `Question: ${question}
+        system:
+          "You are a flight operations assistant. Answer only from provided flight data and insight summary. If data is missing or stale, say so clearly. Always include the latest fetched timestamp.",
+        userMessage: `Question: ${question}
 
 Summary: total=${result.summary.total}, delayed=${result.summary.delayed}, cancelled=${result.summary.cancelled}, latest_fetch=${result.summary.latest_fetch ?? "n/a"}
 Insight: ${result.insight ? `${result.insight.headline} | ${result.insight.summary} | confidence=${result.insight.confidence} | score=${result.insight.score ?? "n/a"}` : "n/a"}
 
 Flight data context:
 ${context || "No matching flights found."}`,
-          },
-        ],
       });
 
-      const answer = completion.choices[0]?.message?.content ?? "No answer";
-      const usage = extractUsage(completion.usage);
+      const answer = llmResult.text || "No answer";
+      const usage = extractClaudeUsage(llmResult);
       await supabase.from("chat_logs").insert({ question, answer });
       logLlmTelemetry("chat_response", {
         route: "/api/chat",
         mode: "flight_query",
-        model: "gpt-4o-mini",
+        model: CHAT_MODEL,
         success: true,
         duration_ms: Date.now() - startedAt,
         ...usage,
@@ -190,30 +182,22 @@ ${context || "No matching flights found."}`,
       })
       .join("\n\n");
 
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+    const llmResult = await generateText({
+      model: CHAT_MODEL,
       temperature: 0.1,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a travel disruption assistant. Answer only from provided official-source and official-X context. If unknown or stale, say so clearly. Always include source citations with URLs and fetched timestamps. Treat X posts as supplementary signal, not sole authority.",
-        },
-        {
-          role: "user",
-          content: `Question: ${question}\n\nOfficial source context:\n${context || "No usable official source context is currently available."}\n\nOfficial X context:\n${socialContext || "No official X posts available."}`,
-        },
-      ],
+      system:
+        "You are a travel disruption assistant. Answer only from provided official-source and official-X context. If unknown or stale, say so clearly. Always include source citations with URLs and fetched timestamps. Treat X posts as supplementary signal, not sole authority.",
+      userMessage: `Question: ${question}\n\nOfficial source context:\n${context || "No usable official source context is currently available."}\n\nOfficial X context:\n${socialContext || "No official X posts available."}`,
     });
 
-    const answer = completion.choices[0]?.message?.content ?? "No answer";
-    const usage = extractUsage(completion.usage);
+    const answer = llmResult.text || "No answer";
+    const usage = extractClaudeUsage(llmResult);
 
     await supabase.from("chat_logs").insert({ question, answer });
     logLlmTelemetry("chat_response", {
       route: "/api/chat",
       mode: "official_sources",
-      model: "gpt-4o-mini",
+      model: CHAT_MODEL,
       success: true,
       duration_ms: Date.now() - startedAt,
       ...usage,

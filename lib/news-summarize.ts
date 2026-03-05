@@ -1,6 +1,6 @@
-import OpenAI from "openai";
+import { generateText, hasAnthropicKey } from "./anthropic";
 
-const NEWS_SUMMARY_MODEL = "gpt-4o-mini";
+const NEWS_SUMMARY_MODEL = "claude-sonnet-4-6";
 
 export type NewsArticleInput = {
   headline: string;
@@ -41,31 +41,21 @@ export async function summarizeNewsCluster(
 ): Promise<string> {
   if (articles.length === 0) return `No current news for ${sourceTopic}`;
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return buildFallbackNewsSummary(sourceTopic, articles);
+  if (!hasAnthropicKey()) return buildFallbackNewsSummary(sourceTopic, articles);
 
   try {
-    const client = new OpenAI({ apiKey });
     const prompt = buildNewsSummaryPrompt(sourceTopic, articles);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10_000);
 
-    try {
-      const response = await client.chat.completions.create(
-        {
-          model: NEWS_SUMMARY_MODEL,
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: 250,
-          temperature: 0.2,
-        },
-        { signal: controller.signal },
-      );
+    const result = await generateText({
+      model: NEWS_SUMMARY_MODEL,
+      temperature: 0.2,
+      maxTokens: 250,
+      timeoutMs: 10_000,
+      system: "You synthesize news articles into concise travel briefings. Follow the user instructions exactly.",
+      userMessage: prompt,
+    });
 
-      const text = response.choices?.[0]?.message?.content ?? "";
-      return parseNewsSummaryResponse(text) ?? buildFallbackNewsSummary(sourceTopic, articles);
-    } finally {
-      clearTimeout(timer);
-    }
+    return parseNewsSummaryResponse(result.text) ?? buildFallbackNewsSummary(sourceTopic, articles);
   } catch {
     return buildFallbackNewsSummary(sourceTopic, articles);
   }

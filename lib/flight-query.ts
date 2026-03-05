@@ -1,6 +1,6 @@
 import { findFlightByNumber, findRouteFlights, FlightObservation } from "@/lib/flightradar";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import OpenAI from "openai";
+import { generateText, hasAnthropicKey } from "./anthropic";
 
 export type FlightIntent =
   | { type: "flight_number"; flightNumber: string }
@@ -394,7 +394,7 @@ async function buildAdvisoryLikelihoodInsight(
 ): Promise<FlightInsight> {
   const horizon = parseHorizonHours(query);
 
-  if (!process.env.OPENAI_API_KEY) {
+  if (!hasAnthropicKey()) {
     return {
       type: "likelihood",
       headline: `Likelihood: ${intent.originLabel} → ${intent.destinationLabel} (advisory-based)`,
@@ -406,36 +406,27 @@ async function buildAdvisoryLikelihoodInsight(
   }
 
   try {
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+    const result = await generateText({
+      model: "claude-sonnet-4-6",
       temperature: 0.1,
-      max_tokens: 280,
-      messages: [
-        {
-          role: "system",
-          content: `You are a Gulf Corridor travel disruption analyst. You help travellers assess likelihood of completing flights into/out of Dubai (DXB) or Abu Dhabi (AUH).
+      maxTokens: 280,
+      system: `You are a Gulf Corridor travel disruption analyst. You help travellers assess likelihood of completing flights into/out of Dubai (DXB) or Abu Dhabi (AUH).
 
 Current airspace context: ${airspaceCount} aircraft observed in UAE/Gulf airspace in last 45 minutes. Normal is ~150-250. Severely low count indicates major disruption.
 
 Your output must be JSON only: { "score": <0-100 integer>, "band": "high|moderate|low|very_low", "headline": "<15 words>", "summary": "<2 sentences max, specific, actionable>", "confidence": "high|medium|low" }
 
 Score guide: 90+ = operating normally, 70-89 = some disruption but likely to operate, 50-69 = significant uncertainty, 30-49 = major disruption likely, <30 = severe disruption/suspension likely.`,
-        },
-        {
-          role: "user",
-          content: `Question: ${query}
+      userMessage: `Question: ${query}
 Route: ${intent.originLabel} (${intent.originCodes.join("/")}) → ${intent.destinationLabel} (${intent.destinationCodes.join("/")})
 Time horizon: next ${horizon} hours
 Aircraft in UAE airspace now: ${airspaceCount} (normal ~200)
 
 Official source advisories:
 ${advisoryContext}`,
-        },
-      ],
     });
 
-    const raw = completion.choices[0]?.message?.content ?? "{}";
+    const raw = result.text || "{}";
     const parsed = JSON.parse(raw.replace(/```json\n?|```/g, "").trim()) as {
       score?: number; band?: string; headline?: string; summary?: string; confidence?: string;
     };
@@ -452,7 +443,7 @@ ${advisoryContext}`,
     return {
       type: "likelihood",
       headline: `${intent.originLabel} → ${intent.destinationLabel}: advisory-based`,
-      summary: "GPT assessment failed. Check official airline and government advisories directly.",
+      summary: "LLM assessment failed. Check official airline and government advisories directly.",
       confidence: "low",
       horizon_hours: horizon,
       score: null,

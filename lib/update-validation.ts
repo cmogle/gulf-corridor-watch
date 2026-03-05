@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import OpenAI from "openai";
+import { generateText, hasAnthropicKey } from "./anthropic";
 
 export type ValidationState = "validated" | "unvalidated" | "failed" | "skipped";
 
@@ -71,14 +71,14 @@ function buildSkipped(reason: string): ValidationMetadata {
 
 export function getUpdateValidationConfig(): ValidationConfig {
   return {
-    enabled: parseBool(process.env.GPT_UPDATE_VALIDATION_ENABLED, true),
-    model: process.env.GPT_UPDATE_VALIDATION_MODEL?.trim() || "gpt-4o-mini",
-    timeoutMs: parsePositiveInt(process.env.GPT_UPDATE_VALIDATION_TIMEOUT_MS, 8000),
+    enabled: parseBool(process.env.LLM_UPDATE_VALIDATION_ENABLED ?? process.env.GPT_UPDATE_VALIDATION_ENABLED, true),
+    model: process.env.LLM_UPDATE_VALIDATION_MODEL?.trim() || process.env.GPT_UPDATE_VALIDATION_MODEL?.trim() || "claude-sonnet-4-6",
+    timeoutMs: parsePositiveInt(process.env.LLM_UPDATE_VALIDATION_TIMEOUT_MS ?? process.env.GPT_UPDATE_VALIDATION_TIMEOUT_MS, 8000),
   };
 }
 
 export function getValidationMaxPerIngest(): number {
-  return parsePositiveInt(process.env.GPT_UPDATE_VALIDATION_MAX_PER_INGEST, 20);
+  return parsePositiveInt(process.env.LLM_UPDATE_VALIDATION_MAX_PER_INGEST ?? process.env.GPT_UPDATE_VALIDATION_MAX_PER_INGEST, 20);
 }
 
 export function computeUpdateContentHash(input: {
@@ -100,44 +100,31 @@ export function computeUpdateContentHash(input: {
 
 export async function validateOfficialUpdate(input: ValidateOfficialUpdateInput): Promise<ValidationMetadata> {
   const cfg = getUpdateValidationConfig();
-  if (!cfg.enabled) return buildSkipped("GPT validation disabled by GPT_UPDATE_VALIDATION_ENABLED");
-  if (!process.env.OPENAI_API_KEY) return buildSkipped("OPENAI_API_KEY not set; validation skipped");
+  if (!cfg.enabled) return buildSkipped("LLM validation disabled by LLM_UPDATE_VALIDATION_ENABLED");
+  if (!hasAnthropicKey()) return buildSkipped("ANTHROPIC_API_KEY not set; validation skipped");
 
   const nowIso = new Date().toISOString();
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
 
   try {
     const rawContext = compact(
       `${input.headline}\n\n${input.summary}\n\n${input.raw_text ?? ""}`,
       9000,
     );
-    const completion = await client.chat.completions.create(
-      {
-        model: cfg.model,
-        temperature: 0,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You classify official travel/transport updates. Return strict JSON only with keys: validated (boolean), score (0..1), reason (short string). Mark validated=true only when content is a meaningful operational/policy/travel-status update and not generic boilerplate, navigation text, or promotional filler.",
-          },
-          {
-            role: "user",
-            content: `source_id=${input.source_id}
+    const result = await generateText({
+      model: cfg.model,
+      temperature: 0,
+      timeoutMs: cfg.timeoutMs,
+      system:
+        "You classify official travel/transport updates. Return strict JSON only with keys: validated (boolean), score (0..1), reason (short string). Mark validated=true only when content is a meaningful operational/policy/travel-status update and not generic boilerplate, navigation text, or promotional filler.",
+      userMessage: `source_id=${input.source_id}
 update_type=${input.update_type}
 original_url=${input.original_url}
 headline=${compact(input.headline, 800)}
 summary=${compact(input.summary, 3000)}
 raw_context=${rawContext}`,
-          },
-        ],
-      },
-      { signal: controller.signal },
-    );
+    });
 
-    const content = completion.choices[0]?.message?.content ?? "";
+    const content = result.text;
     const parsed = JSON.parse(extractJsonObject(content)) as { validated?: unknown; score?: unknown; reason?: unknown };
     const validated = parsed.validated === true;
     const scoreRaw = Number(parsed.score);
@@ -159,7 +146,5 @@ raw_context=${rawContext}`,
       validation_model: cfg.model,
       validated_at: nowIso,
     };
-  } finally {
-    clearTimeout(timer);
   }
 }

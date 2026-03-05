@@ -1,5 +1,5 @@
 import { runFlightQuery } from "@/lib/flight-query";
-import OpenAI from "openai";
+import { generateText, hasAnthropicKey } from "@/lib/anthropic";
 
 function normalizedIntent(intent: Awaited<ReturnType<typeof runFlightQuery>>["intent"]) {
   if (intent.type === "flight_number") {
@@ -30,16 +30,15 @@ export async function POST(req: Request) {
       return Response.json({ ok: true, mode, normalized_intent: normalizedIntent(result.intent), ...result });
     }
 
-    if (!process.env.OPENAI_API_KEY) {
+    if (!hasAnthropicKey()) {
       return Response.json({
         ok: true,
         mode,
         ...result,
-        explanation: "AI explanation unavailable (missing OPENAI_API_KEY). Structured results are shown above.",
+        explanation: "AI explanation unavailable (missing ANTHROPIC_API_KEY). Structured results are shown above.",
       });
     }
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const contextRows = result.flights
       .slice(0, 20)
       .map(
@@ -48,27 +47,19 @@ export async function POST(req: Request) {
       )
       .join("\n");
 
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+    const llmResult = await generateText({
+      model: "claude-sonnet-4-6",
       temperature: 0.1,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a flight operations assistant. Use only the provided dataset summary and rows. Keep response concise, explicit about uncertainty, and include latest fetch timestamp.",
-        },
-        {
-          role: "user",
-          content: `Question: ${query}
+      system:
+        "You are a flight operations assistant. Use only the provided dataset summary and rows. Keep response concise, explicit about uncertainty, and include latest fetch timestamp.",
+      userMessage: `Question: ${query}
 Summary: total=${result.summary.total}, delayed=${result.summary.delayed}, cancelled=${result.summary.cancelled}, latest_fetch=${result.summary.latest_fetch ?? "n/a"}
 Insight: ${result.insight ? `${result.insight.headline} | ${result.insight.summary} | confidence=${result.insight.confidence}` : "n/a"}
 Rows:
 ${contextRows || "none"}`,
-        },
-      ],
     });
 
-    const explanation = completion.choices[0]?.message?.content ?? null;
+    const explanation = llmResult.text || null;
     return Response.json({ ok: true, mode, normalized_intent: normalizedIntent(result.intent), ...result, explanation });
   } catch (error) {
     return Response.json({ ok: false, error: String(error) }, { status: 500 });

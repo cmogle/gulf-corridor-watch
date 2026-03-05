@@ -54,13 +54,15 @@ export async function GET(req: Request) {
       fetched_at: new Date().toISOString(),
     });
   } catch (error) {
+    const errorDetail = error instanceof Error ? error.message : JSON.stringify(error);
+    console.error("Brief refresh failed:", errorDetail, error);
     logLlmTelemetry("brief_refresh_request", {
       route: "/api/brief/refresh",
       mode: "http",
       success: false,
       duration_ms: Date.now() - startedAt,
-      error: String(error),
+      error: errorDetail,
     });
-    return Response.json({ ok: false, error: String(error) }, { status: 500 });
+    return Response.json({ ok: false, error: errorDetail }, { status: 500 });
   }
 }

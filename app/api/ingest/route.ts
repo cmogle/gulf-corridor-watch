@@ -6,6 +6,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { ingestAirports, type AirportCode } from "@/lib/flightradar";
 import { ingestAirportsOpenSky } from "@/lib/opensky";
 import { isCronAuthorized } from "@/lib/cron-auth";
+import { isSessionActive } from "@/lib/session-gate";
 import { detectCrisisEvent } from "@/lib/crisis-detection";
 
 const AIRPORTS: AirportCode[] = ["DXB", "AUH"];
@@ -48,6 +49,10 @@ export async function GET(req: Request) {
 
   if (!isCronAuthorized(req)) {
     return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!(await isSessionActive())) {
+    return Response.json({ ok: true, skipped: "no_active_session" });
   }
 
   try {

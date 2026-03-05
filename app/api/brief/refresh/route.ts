@@ -1,6 +1,7 @@
 import { refreshCurrentStateBrief } from "@/lib/current-state-brief";
 import { logLlmTelemetry } from "@/lib/llm-telemetry";
 import { isCronAuthorized } from "@/lib/cron-auth";
+import { isSessionActive } from "@/lib/session-gate";
 import { buildSituationContext, invalidateSituationContextCache } from "@/lib/chat-context";
 import { refreshPrecomputedAnswers } from "@/lib/precomputed-answers";
 
@@ -11,6 +12,10 @@ export async function GET(req: Request) {
 
   if (!isCronAuthorized(req)) {
     return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!(await isSessionActive())) {
+    return Response.json({ ok: true, skipped: "no_active_session" });
   }
 
   try {

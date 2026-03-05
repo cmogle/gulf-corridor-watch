@@ -3,6 +3,7 @@ import { ingestAirports, type AirportCode } from "@/lib/flightradar";
 import { ingestAirportsOpenSky } from "@/lib/opensky";
 import { fetchAllBoards } from "@/lib/flight-schedules";
 import { isCronAuthorized } from "@/lib/cron-auth";
+import { isSessionActive } from "@/lib/session-gate";
 
 const AIRPORTS: AirportCode[] = ["DXB", "AUH", "DWC"];
 
@@ -11,6 +12,10 @@ export const maxDuration = 60;
 export async function GET(req: Request) {
   if (!isCronAuthorized(req)) {
     return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!(await isSessionActive())) {
+    return Response.json({ ok: true, skipped: "no_active_session" });
   }
 
   const supabase = getSupabaseAdmin();

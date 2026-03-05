@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { AuthProvider } from "@/app/components/auth-provider";
+import { HeartbeatProvider } from "@/app/components/heartbeat-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -40,7 +41,9 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen antialiased">
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <HeartbeatProvider>{children}</HeartbeatProvider>
+        </AuthProvider>
       </body>
     </html>
   );

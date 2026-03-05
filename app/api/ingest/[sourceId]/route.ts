@@ -3,6 +3,7 @@ import { OFFICIAL_SOURCES } from "@/lib/sources";
 import { ingestSingleSource } from "@/lib/ingest";
 import { ingestTrustedSourceById, isXSourceId } from "@/lib/trusted-feed-ingest";
 import { isCronAuthorized } from "@/lib/cron-auth";
+import { isSessionActive } from "@/lib/session-gate";
 
 export const maxDuration = 60;
 
@@ -14,6 +15,10 @@ export async function GET(
 
   if (!isCronAuthorized(req)) {
     return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!(await isSessionActive())) {
+    return Response.json({ ok: true, skipped: "no_active_session" });
   }
 
   try {

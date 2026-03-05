@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { isCronAuthorized } from "@/lib/cron-auth";
+import { isSessionActive } from "@/lib/session-gate";
 import { loadTrustedFeed, loadTrustedSourceHealth, recordFeedBaselineMetric } from "@/lib/trusted-feed-repo";
 import { loadUnifiedFeed } from "@/lib/unified-updates";
 
@@ -8,6 +9,10 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   if (!isCronAuthorized(req)) {
     return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!(await isSessionActive())) {
+    return Response.json({ ok: true, skipped: "no_active_session" });
   }
 
   try {

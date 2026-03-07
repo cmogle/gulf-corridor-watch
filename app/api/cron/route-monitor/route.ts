@@ -15,22 +15,19 @@ export async function GET(req: Request) {
   let observationCount = 0;
 
   try {
-    // 1. Fetch DXB departure board and filter to FZ → BEG
+    // 1. Fetch full DXB departure board (store all for airport pulse context)
     const departures = await fetchAirportBoard("DXB", "departure");
-    const fzBeg = departures.filter(
-      (f) =>
-        f.flight_number.startsWith("FZ") &&
-        f.destination_iata === "BEG"
-    );
 
-    if (fzBeg.length > 0) {
+    if (departures.length > 0) {
       const { error } = await supabase
         .from("flight_schedules")
-        .upsert(fzBeg, {
+        .upsert(departures, {
           onConflict: "airport,board_type,flight_number,scheduled_time",
         });
       if (error) throw error;
-      scheduleCount = fzBeg.length;
+      scheduleCount = departures.filter(
+        (f) => f.flight_number.startsWith("FZ") && f.destination_iata === "BEG"
+      ).length;
     }
 
     // 2. Fetch live positions and filter to FZ → BEG

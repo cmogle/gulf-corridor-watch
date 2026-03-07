@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { FlightCard } from "./flight-card";
 import { FlightMap } from "./flight-map";
+import { AirportPulse } from "./airport-pulse";
 
 type Schedule = {
   flight_number: string;
@@ -26,9 +27,32 @@ type LivePosition = {
   } | null;
 };
 
+type DxbDeparture = {
+  flight_number: string;
+  airline: string | null;
+  destination_iata: string | null;
+  scheduled_time: string;
+  estimated_time: string | null;
+  actual_time: string | null;
+  status: string;
+  is_delayed: boolean;
+  delay_minutes: number | null;
+  is_cancelled: boolean;
+  gate: string | null;
+  terminal: string | null;
+};
+
+type DxbStats = {
+  total: number;
+  delayed: number;
+  cancelled: number;
+};
+
 type FlightsResponse = {
   schedules: Schedule[];
   livePositions: LivePosition[];
+  dxbDepartures: DxbDeparture[];
+  dxbStats: DxbStats;
   queriedAt: string;
 };
 
@@ -128,6 +152,9 @@ export function RouteMonitor({ initial }: Props) {
           )}
         </div>
       </div>
+
+      {/* Airport pulse */}
+      <AirportPulse stats={data.dxbStats} departures={data.dxbDepartures} />
 
       {/* Map (only if airborne) */}
       {airborne?.raw_payload && (

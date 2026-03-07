@@ -1,70 +1,10 @@
 {
   "crons": [
-    { "path": "/api/brief/refresh", "schedule": "*/15 * * * *" },
-    { "path": "/api/metrics/baseline", "schedule": "*/30 * * * *" },
-
-    { "path": "/api/ingest/emirates_updates", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest/etihad_advisory", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest/flydubai_updates", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest/gcaa_uae", "schedule": "*/15 * * * *" },
-    { "path": "/api/ingest/rta_dubai", "schedule": "*/15 * * * *" },
-    { "path": "/api/ingest/heathrow_airport_x", "schedule": "*/15 * * * *" },
-    { "path": "/api/ingest/emirates_x", "schedule": "*/15 * * * *" },
-    { "path": "/api/ingest/etihad_x", "schedule": "*/15 * * * *" },
-    { "path": "/api/ingest/flydubai_x", "schedule": "*/15 * * * *" },
-
-    { "path": "/api/ingest/uae_mofa", "schedule": "*/15 * * * *" },
-    { "path": "/api/ingest/white_house_statements", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest/us_dod_releases", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest/us_centcom_news", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest/oman_air", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest/air_arabia_updates", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest/qatar_airways_updates", "schedule": "*/30 * * * *" },
-
-    { "path": "/api/ingest/us_state_dept_travel", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest/visit_dubai_news", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest/india_mea", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest/india_immigration_boi", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest/uk_fcdo_uae", "schedule": "*/30 * * * *" },
-
-    { "path": "/api/ingest/australia_dfat_uae", "schedule": "0 */1 * * *" },
-    { "path": "/api/ingest/canada_gac_uae", "schedule": "0 */1 * * *" },
-
-    { "path": "/api/ingest/bbc_middle_east", "schedule": "*/15 * * * *" },
-    { "path": "/api/ingest/aljazeera_news", "schedule": "*/15 * * * *" },
-    { "path": "/api/ingest/gn_uae_flights", "schedule": "*/15 * * * *" },
-    { "path": "/api/ingest/gn_gulf_conflict", "schedule": "*/15 * * * *" },
-    { "path": "/api/ingest/gn_dubai_airport", "schedule": "*/15 * * * *" },
-
-    { "path": "/api/ingest/gn_strait_hormuz", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest/gn_india_dubai_travel", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest/uk_fcdo_iran", "schedule": "*/30 * * * *" },
-
-    { "path": "/api/ingest/flights", "schedule": "*/15 * * * *" },
-    { "path": "/api/ingest/expert-feed", "schedule": "*/30 * * * *" },
-    { "path": "/api/ingest", "schedule": "0 */1 * * *" }
+    { "path": "/api/cron/route-monitor", "schedule": "*/5 * * * *" }
   ],
   "functions": {
-    "app/api/ingest/[sourceId]/route.ts": {
-      "maxDuration": 60
-    },
-    "app/api/ingest/route.ts": {
-      "maxDuration": 300
-    },
-    "app/api/metrics/baseline/route.ts": {
-      "maxDuration": 60
-    },
-    "app/api/chat/route.ts": {
-      "maxDuration": 60
-    },
-    "app/api/ingest/flights/route.ts": {
-      "maxDuration": 60
-    },
-    "app/api/ingest/expert-feed/route.ts": {
-      "maxDuration": 120
-    },
-    "app/api/catchup/route.ts": {
-      "maxDuration": 300
+    "app/api/cron/route-monitor/route.ts": {
+      "maxDuration": 30
     }
   }
 }

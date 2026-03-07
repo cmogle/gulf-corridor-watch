@@ -1,18 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { AuthProvider } from "@/app/components/auth-provider";
-import { HeartbeatProvider } from "@/app/components/heartbeat-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Keep Calm & Carry On — UAE Airspace & Travel Status",
+  title: "FlyDubai DXB → BEG — Route Monitor",
   description:
-    "Live UAE airspace status, flight tracking, and official advisories for residents and travellers during the current crisis.",
-  openGraph: {
-    title: "Keep Calm & Carry On — UAE Airspace Status",
-    description:
-      "Live flight data, official advisories, and AI-powered answers for UAE residents and stranded travellers.",
-    siteName: "keepcalmandcarryon.help",
-  },
+    "Live flight status for FlyDubai routes from Dubai to Belgrade. Delays, cancellations, and live tracking.",
 };
 
 export const viewport: Viewport = {
@@ -23,11 +15,9 @@ export const viewport: Viewport = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
@@ -36,14 +26,12 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
         <link
-          href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&amp;family=DM+Serif+Display&amp;family=JetBrains+Mono:wght@400&amp;display=swap"
+          href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap"
           rel="stylesheet"
         />
       </head>
-      <body className="min-h-screen antialiased">
-        <AuthProvider>
-          <HeartbeatProvider>{children}</HeartbeatProvider>
-        </AuthProvider>
+      <body className="min-h-screen bg-gray-950 text-gray-100 antialiased">
+        {children}
       </body>
     </html>
   );

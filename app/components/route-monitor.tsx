@@ -5,53 +5,34 @@ import { FlightCard } from "./flight-card";
 import { FlightMap } from "./flight-map";
 import { AirportPulse } from "./airport-pulse";
 
-type Schedule = {
-  flight_number: string;
-  scheduled_time: string;
-  estimated_time: string | null;
-  actual_time: string | null;
-  status: string;
-  is_delayed: boolean;
-  delay_minutes: number | null;
-  is_cancelled: boolean;
-  gate: string | null;
-  terminal: string | null;
-};
-
-type LivePosition = {
-  flight_number: string;
-  status: string;
-  raw_payload: {
-    lat: number;
-    lon: number;
-  } | null;
-};
-
-type DxbDeparture = {
+type FlightObservation = {
   flight_number: string;
   airline: string | null;
+  origin_iata: string | null;
   destination_iata: string | null;
-  scheduled_time: string;
-  estimated_time: string | null;
-  actual_time: string | null;
   status: string;
   is_delayed: boolean;
   delay_minutes: number | null;
-  is_cancelled: boolean;
-  gate: string | null;
-  terminal: string | null;
+  estimated_time: string | null;
+  actual_time: string | null;
+  fetched_at: string;
+  raw_payload: {
+    lat?: number;
+    lon?: number;
+    alt?: number;
+    gspeed?: number;
+  } | null;
 };
 
 type DxbStats = {
   total: number;
-  delayed: number;
-  cancelled: number;
+  airborne: number;
+  onGround: number;
 };
 
 type FlightsResponse = {
-  schedules: Schedule[];
-  livePositions: LivePosition[];
-  dxbDepartures: DxbDeparture[];
+  fzBegFlights: FlightObservation[];
+  dxbDepartures: FlightObservation[];
   dxbStats: DxbStats;
   queriedAt: string;
 };
@@ -83,43 +64,39 @@ export function RouteMonitor({ initial }: Props) {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  const now = new Date();
-  const upcoming = data.schedules.filter(
-    (s) => new Date(s.scheduled_time) > now || ["boarding", "departed"].includes(s.status)
-  );
-  const past = data.schedules.filter(
-    (s) => new Date(s.scheduled_time) <= now && !["boarding", "departed"].includes(s.status)
+  const { fzBegFlights, dxbDepartures, dxbStats } = data;
+
+  // Find airborne FZ→BEG flight with position
+  const airborne = fzBegFlights.find(
+    (f) =>
+      f.raw_payload?.lat != null &&
+      f.raw_payload?.lon != null &&
+      ["airborne", "cruise", "departure"].includes(f.status)
   );
 
-  // Find airborne flight with position
-  const airborne = data.livePositions.find(
-    (p) =>
-      p.raw_payload?.lat != null &&
-      p.raw_payload?.lon != null &&
-      ["airborne", "cruise", "departure"].includes(p.status)
+  // Split FZ→BEG into active (currently visible on radar) vs not
+  const activeFlights = fzBegFlights.filter(
+    (f) => ["airborne", "cruise", "departure", "on_ground", "approach"].includes(f.status)
+  );
+  const pastFlights = fzBegFlights.filter(
+    (f) => !["airborne", "cruise", "departure", "on_ground", "approach"].includes(f.status)
   );
 
-  const onTimeCount = upcoming.filter(
-    (s) => !s.is_delayed && !s.is_cancelled
+  const airborneCount = activeFlights.filter(
+    (f) => ["airborne", "cruise", "departure"].includes(f.status)
   ).length;
-  const delayedCount = upcoming.filter((s) => s.is_delayed).length;
-  const cancelledCount = upcoming.filter((s) => s.is_cancelled).length;
 
   function summaryText(): string {
+    if (fzBegFlights.length === 0) return "No FZ flights to BEG observed recently";
     const parts: string[] = [];
-    if (upcoming.length === 0) return "No upcoming flights found";
-    parts.push(`${upcoming.length} flight${upcoming.length !== 1 ? "s" : ""} in next 48hrs`);
-    const details: string[] = [];
-    if (onTimeCount > 0) details.push(`${onTimeCount} on time`);
-    if (delayedCount > 0) details.push(`${delayedCount} delayed`);
-    if (cancelledCount > 0) details.push(`${cancelledCount} cancelled`);
-    if (details.length > 0) parts.push(details.join(", "));
+    if (activeFlights.length > 0) {
+      if (airborneCount > 0) parts.push(`${airborneCount} airborne now`);
+      const groundCount = activeFlights.length - airborneCount;
+      if (groundCount > 0) parts.push(`${groundCount} on ground`);
+    }
+    parts.push(`${fzBegFlights.length} seen in last 24hrs`);
     return parts.join(" — ");
   }
-
-  const airborneFlights = data.livePositions.filter(
-    (p) => ["airborne", "cruise", "departure"].includes(p.status)
-  );
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-6">
@@ -154,38 +131,36 @@ export function RouteMonitor({ initial }: Props) {
       </div>
 
       {/* Airport pulse */}
-      <AirportPulse stats={data.dxbStats} departures={data.dxbDepartures} />
+      <AirportPulse stats={dxbStats} departures={dxbDepartures} />
 
-      {/* Map (only if airborne) */}
+      {/* Map (only if airborne FZ→BEG) */}
       {airborne?.raw_payload && (
         <div className="mb-4">
           <FlightMap
-            lat={airborne.raw_payload.lat}
-            lon={airborne.raw_payload.lon}
+            lat={airborne.raw_payload.lat!}
+            lon={airborne.raw_payload.lon!}
             flightNumber={airborne.flight_number}
           />
         </div>
       )}
 
-      {/* Upcoming flights */}
-      {upcoming.length > 0 && (
+      {/* Active FZ→BEG flights */}
+      {activeFlights.length > 0 && (
         <div className="space-y-3">
-          {upcoming.map((s) => (
+          {activeFlights.map((f) => (
             <FlightCard
-              key={`${s.flight_number}-${s.scheduled_time}`}
-              flightNumber={s.flight_number}
-              scheduledTime={s.scheduled_time}
-              estimatedTime={s.estimated_time}
-              actualTime={s.actual_time}
-              status={s.status as Parameters<typeof FlightCard>[0]["status"]}
-              isDelayed={s.is_delayed}
-              delayMinutes={s.delay_minutes}
-              isCancelled={s.is_cancelled}
-              gate={s.gate}
-              terminal={s.terminal}
-              isAirborne={airborneFlights.some(
-                (a) => a.flight_number === s.flight_number
-              )}
+              key={`${f.flight_number}-${f.fetched_at}`}
+              flightNumber={f.flight_number}
+              scheduledTime={f.actual_time ?? f.fetched_at}
+              estimatedTime={f.estimated_time}
+              actualTime={f.actual_time}
+              status={mapObsStatus(f.status)}
+              isDelayed={f.is_delayed}
+              delayMinutes={f.delay_minutes}
+              isCancelled={false}
+              gate={null}
+              terminal={null}
+              isAirborne={["airborne", "cruise", "departure"].includes(f.status)}
               isPast={false}
             />
           ))}
@@ -193,38 +168,39 @@ export function RouteMonitor({ initial }: Props) {
       )}
 
       {/* No flights message */}
-      {upcoming.length === 0 && past.length === 0 && (
+      {fzBegFlights.length === 0 && (
         <div className="rounded-xl border border-gray-800 bg-gray-900 p-8 text-center">
           <p className="text-lg text-gray-300">
-            No FlyDubai flights to Belgrade found
+            No FlyDubai flights to Belgrade detected
           </p>
           <p className="mt-2 text-sm text-gray-500">
-            This could mean the route isn&apos;t currently scheduled, or data
-            hasn&apos;t been collected yet. The cron runs every 5 minutes.
+            Live positions are checked every 5 minutes. A flight will appear
+            here once it begins taxiing or is airborne. Check back closer to
+            departure time.
           </p>
         </div>
       )}
 
-      {/* Past flights (history) */}
-      {past.length > 0 && (
+      {/* Past observations */}
+      {pastFlights.length > 0 && (
         <div className="mt-6">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-gray-500">
             Recent history
           </h2>
           <div className="space-y-3">
-            {past.map((s) => (
+            {pastFlights.map((f) => (
               <FlightCard
-                key={`${s.flight_number}-${s.scheduled_time}`}
-                flightNumber={s.flight_number}
-                scheduledTime={s.scheduled_time}
-                estimatedTime={s.estimated_time}
-                actualTime={s.actual_time}
-                status={s.status as Parameters<typeof FlightCard>[0]["status"]}
-                isDelayed={s.is_delayed}
-                delayMinutes={s.delay_minutes}
-                isCancelled={s.is_cancelled}
-                gate={s.gate}
-                terminal={s.terminal}
+                key={`${f.flight_number}-${f.fetched_at}`}
+                flightNumber={f.flight_number}
+                scheduledTime={f.actual_time ?? f.fetched_at}
+                estimatedTime={f.estimated_time}
+                actualTime={f.actual_time}
+                status={mapObsStatus(f.status)}
+                isDelayed={f.is_delayed}
+                delayMinutes={f.delay_minutes}
+                isCancelled={false}
+                gate={null}
+                terminal={null}
                 isAirborne={false}
                 isPast={true}
               />
@@ -235,9 +211,28 @@ export function RouteMonitor({ initial }: Props) {
 
       {/* Footer */}
       <footer className="mt-8 border-t border-gray-800 pt-4 text-center text-xs text-gray-600">
-        <p>Data from Flightradar24. Refreshes every 5 minutes.</p>
+        <p>Live positions from Flightradar24. Checked every 5 minutes.</p>
         <p className="mt-1">Times shown in Gulf Standard Time (GST / UTC+4).</p>
+        <p className="mt-1 text-gray-700">
+          Flights appear once taxiing or airborne — future schedules not available.
+        </p>
       </footer>
     </main>
   );
+}
+
+/** Map observation status strings to FlightCard status type */
+function mapObsStatus(status: string): "scheduled" | "delayed" | "cancelled" | "departed" | "boarding" | "landed" | "diverted" | "unknown" {
+  switch (status) {
+    case "airborne":
+    case "cruise":
+    case "departure":
+      return "departed";
+    case "on_ground":
+      return "boarding";
+    case "approach":
+      return "landed";
+    default:
+      return "unknown";
+  }
 }

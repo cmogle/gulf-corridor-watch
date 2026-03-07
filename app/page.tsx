@@ -6,54 +6,63 @@ export const dynamic = "force-dynamic";
 async function loadInitialData() {
   const supabase = getSupabaseAdmin();
   const now = new Date();
+  const recent30m = new Date(now.getTime() - 30 * 60_000).toISOString();
   const past24h = new Date(now.getTime() - 24 * 60 * 60_000).toISOString();
-  const future48h = new Date(now.getTime() + 48 * 60 * 60_000).toISOString();
-  const recent10m = new Date(now.getTime() - 10 * 60_000).toISOString();
-  const past6h = new Date(now.getTime() - 6 * 60 * 60_000).toISOString();
 
-  const [schedResult, obsResult, dxbResult] = await Promise.all([
-    supabase
-      .from("flight_schedules")
-      .select("*")
-      .eq("airport", "DXB")
-      .eq("board_type", "departure")
-      .like("flight_number", "FZ%")
-      .eq("destination_iata", "BEG")
-      .gte("scheduled_time", past24h)
-      .lte("scheduled_time", future48h)
-      .order("scheduled_time", { ascending: true }),
-
+  const [fzBegResult, dxbResult] = await Promise.all([
+    // FZ → BEG observations from last 24h
     supabase
       .from("flight_observations")
       .select("*")
       .like("flight_number", "FZ%")
       .eq("destination_iata", "BEG")
-      .gte("fetched_at", recent10m)
+      .gte("fetched_at", past24h)
       .order("fetched_at", { ascending: false }),
 
+    // All DXB departures from last 30min (live airport pulse)
     supabase
-      .from("flight_schedules")
-      .select("flight_number,airline,destination_iata,scheduled_time,estimated_time,actual_time,status,is_delayed,delay_minutes,is_cancelled,gate,terminal")
-      .eq("airport", "DXB")
-      .eq("board_type", "departure")
-      .gte("scheduled_time", past6h)
-      .order("scheduled_time", { ascending: false })
-      .limit(100),
+      .from("flight_observations")
+      .select("*")
+      .eq("origin_iata", "DXB")
+      .gte("fetched_at", recent30m)
+      .order("fetched_at", { ascending: false })
+      .limit(300),
   ]);
 
-  const dxbDepartures = dxbResult.data ?? [];
+  const fzBegAll = fzBegResult.data ?? [];
+  const dxbAll = dxbResult.data ?? [];
+
+  // Deduplicate: keep latest observation per flight_number
+  const fzBegFlights = deduplicateByFlight(fzBegAll);
+  const dxbDepartures = deduplicateByFlight(dxbAll);
+
+  const airborneCount = dxbDepartures.filter(
+    (d: { status: string }) => ["airborne", "cruise", "departure"].includes(d.status)
+  ).length;
+  const onGroundCount = dxbDepartures.filter(
+    (d: { status: string }) => d.status === "on_ground"
+  ).length;
 
   return {
-    schedules: schedResult.data ?? [],
-    livePositions: obsResult.data ?? [],
+    fzBegFlights,
     dxbDepartures,
     dxbStats: {
       total: dxbDepartures.length,
-      delayed: dxbDepartures.filter((d: { is_delayed: boolean }) => d.is_delayed).length,
-      cancelled: dxbDepartures.filter((d: { is_cancelled: boolean }) => d.is_cancelled).length,
+      airborne: airborneCount,
+      onGround: onGroundCount,
     },
     queriedAt: now.toISOString(),
   };
+}
+
+function deduplicateByFlight<T extends { flight_number: string }>(observations: T[]): T[] {
+  const seen = new Map<string, T>();
+  for (const obs of observations) {
+    if (!seen.has(obs.flight_number)) {
+      seen.set(obs.flight_number, obs);
+    }
+  }
+  return Array.from(seen.values());
 }
 
 export default async function Home() {

@@ -1,5 +1,4 @@
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { fetchAirportBoard } from "@/lib/flight-schedules";
 import { ingestAirports } from "@/lib/flightradar";
 import { isCronAuthorized } from "@/lib/cron-auth";
 
@@ -11,51 +10,42 @@ export async function GET(req: Request) {
   }
 
   const supabase = getSupabaseAdmin();
-  let scheduleCount = 0;
-  let observationCount = 0;
 
   try {
-    // 1. Fetch full DXB departure board (store all for airport pulse context)
-    const departures = await fetchAirportBoard("DXB", "departure");
+    if (!process.env.FLIGHTRADAR_KEY) {
+      return Response.json({
+        ok: false,
+        error: "FLIGHTRADAR_KEY not configured",
+      }, { status: 500 });
+    }
 
-    if (departures.length > 0) {
-      const { error } = await supabase
-        .from("flight_schedules")
-        .upsert(departures, {
-          onConflict: "airport,board_type,flight_number,scheduled_time",
-        });
+    // Fetch ALL live positions in UAE/Gulf airspace
+    const allObs = await ingestAirports(["DXB"]);
+
+    // Filter to only DXB-related flights (departing from or arriving to DXB)
+    const dxbObs = allObs.filter(
+      (o) => o.origin_iata === "DXB" || o.destination_iata === "DXB" || o.airport === "DXB"
+    );
+
+    let insertedCount = 0;
+
+    if (dxbObs.length > 0) {
+      const { error, count } = await supabase
+        .from("flight_observations")
+        .insert(dxbObs);
       if (error) throw error;
-      scheduleCount = departures.filter(
-        (f) => f.flight_number.startsWith("FZ") && f.destination_iata === "BEG"
-      ).length;
+      insertedCount = count ?? dxbObs.length;
     }
 
-    // 2. Fetch live positions and filter to FZ → BEG
-    if (process.env.FLIGHTRADAR_KEY) {
-      try {
-        const allObs = await ingestAirports(["DXB"]);
-        const fzBegObs = allObs.filter(
-          (o) =>
-            o.flight_number.startsWith("FZ") &&
-            o.destination_iata === "BEG"
-        );
-
-        if (fzBegObs.length > 0) {
-          const { error } = await supabase
-            .from("flight_observations")
-            .insert(fzBegObs);
-          if (error) throw error;
-          observationCount = fzBegObs.length;
-        }
-      } catch (err) {
-        console.error("Live position fetch failed:", err);
-      }
-    }
+    const fzBegCount = dxbObs.filter(
+      (o) => o.flight_number.startsWith("FZ") && o.destination_iata === "BEG"
+    ).length;
 
     return Response.json({
       ok: true,
-      schedules: scheduleCount,
-      observations: observationCount,
+      total_positions: allObs.length,
+      dxb_stored: insertedCount,
+      fz_beg: fzBegCount,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

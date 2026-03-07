@@ -4,9 +4,11 @@ import { useState, useEffect, useCallback } from "react";
 import { FlightCard } from "./flight-card";
 import { FlightMap } from "./flight-map";
 import { AirportPulse } from "./airport-pulse";
+import { FlightDrawer, type DrawerFlight } from "./flight-drawer";
 
 type FlightObservation = {
   flight_number: string;
+  callsign: string | null;
   airline: string | null;
   origin_iata: string | null;
   destination_iata: string | null;
@@ -16,12 +18,7 @@ type FlightObservation = {
   estimated_time: string | null;
   actual_time: string | null;
   fetched_at: string;
-  raw_payload: {
-    lat?: number;
-    lon?: number;
-    alt?: number;
-    gspeed?: number;
-  } | null;
+  raw_payload: Record<string, unknown> | null;
 };
 
 type DxbStats = {
@@ -45,6 +42,7 @@ export function RouteMonitor({ initial }: Props) {
   const [data, setData] = useState<FlightsResponse>(initial);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [stale, setStale] = useState(false);
+  const [selectedFlight, setSelectedFlight] = useState<DrawerFlight | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -68,10 +66,12 @@ export function RouteMonitor({ initial }: Props) {
 
   // Find airborne FZ→BEG flight with position
   const airborne = fzBegFlights.find(
-    (f) =>
-      f.raw_payload?.lat != null &&
-      f.raw_payload?.lon != null &&
-      ["airborne", "cruise", "departure"].includes(f.status)
+    (f) => {
+      const rp = f.raw_payload as Record<string, unknown> | null;
+      return rp?.lat != null &&
+        rp?.lon != null &&
+        ["airborne", "cruise", "departure"].includes(f.status);
+    }
   );
 
   // Split FZ→BEG into active (currently visible on radar) vs not
@@ -97,6 +97,23 @@ export function RouteMonitor({ initial }: Props) {
     parts.push(`${fzBegFlights.length} seen in last 24hrs`);
     return parts.join(" — ");
   }
+
+  function toDrawerFlight(f: FlightObservation): DrawerFlight {
+    return {
+      flight_number: f.flight_number,
+      callsign: f.callsign,
+      airline: f.airline,
+      origin_iata: f.origin_iata,
+      destination_iata: f.destination_iata,
+      status: f.status,
+      estimated_time: f.estimated_time,
+      actual_time: f.actual_time,
+      fetched_at: f.fetched_at,
+      raw_payload: f.raw_payload as DrawerFlight["raw_payload"],
+    };
+  }
+
+  const airborneRp = airborne?.raw_payload as Record<string, unknown> | null;
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-6">
@@ -131,14 +148,18 @@ export function RouteMonitor({ initial }: Props) {
       </div>
 
       {/* Airport pulse */}
-      <AirportPulse stats={dxbStats} departures={dxbDepartures} />
+      <AirportPulse
+        stats={dxbStats}
+        departures={dxbDepartures}
+        onSelectFlight={setSelectedFlight}
+      />
 
       {/* Map (only if airborne FZ→BEG) */}
-      {airborne?.raw_payload && (
+      {airborne && airborneRp && (
         <div className="mb-4">
           <FlightMap
-            lat={airborne.raw_payload.lat!}
-            lon={airborne.raw_payload.lon!}
+            lat={airborneRp.lat as number}
+            lon={airborneRp.lon as number}
             flightNumber={airborne.flight_number}
           />
         </div>
@@ -148,21 +169,26 @@ export function RouteMonitor({ initial }: Props) {
       {activeFlights.length > 0 && (
         <div className="space-y-3">
           {activeFlights.map((f) => (
-            <FlightCard
+            <div
               key={`${f.flight_number}-${f.fetched_at}`}
-              flightNumber={f.flight_number}
-              scheduledTime={f.actual_time ?? f.fetched_at}
-              estimatedTime={f.estimated_time}
-              actualTime={f.actual_time}
-              status={mapObsStatus(f.status)}
-              isDelayed={f.is_delayed}
-              delayMinutes={f.delay_minutes}
-              isCancelled={false}
-              gate={null}
-              terminal={null}
-              isAirborne={["airborne", "cruise", "departure"].includes(f.status)}
-              isPast={false}
-            />
+              className="cursor-pointer"
+              onClick={() => setSelectedFlight(toDrawerFlight(f))}
+            >
+              <FlightCard
+                flightNumber={f.flight_number}
+                scheduledTime={f.actual_time ?? f.fetched_at}
+                estimatedTime={f.estimated_time}
+                actualTime={f.actual_time}
+                status={mapObsStatus(f.status)}
+                isDelayed={f.is_delayed}
+                delayMinutes={f.delay_minutes}
+                isCancelled={false}
+                gate={null}
+                terminal={null}
+                isAirborne={["airborne", "cruise", "departure"].includes(f.status)}
+                isPast={false}
+              />
+            </div>
           ))}
         </div>
       )}
@@ -189,21 +215,26 @@ export function RouteMonitor({ initial }: Props) {
           </h2>
           <div className="space-y-3">
             {pastFlights.map((f) => (
-              <FlightCard
+              <div
                 key={`${f.flight_number}-${f.fetched_at}`}
-                flightNumber={f.flight_number}
-                scheduledTime={f.actual_time ?? f.fetched_at}
-                estimatedTime={f.estimated_time}
-                actualTime={f.actual_time}
-                status={mapObsStatus(f.status)}
-                isDelayed={f.is_delayed}
-                delayMinutes={f.delay_minutes}
-                isCancelled={false}
-                gate={null}
-                terminal={null}
-                isAirborne={false}
-                isPast={true}
-              />
+                className="cursor-pointer"
+                onClick={() => setSelectedFlight(toDrawerFlight(f))}
+              >
+                <FlightCard
+                  flightNumber={f.flight_number}
+                  scheduledTime={f.actual_time ?? f.fetched_at}
+                  estimatedTime={f.estimated_time}
+                  actualTime={f.actual_time}
+                  status={mapObsStatus(f.status)}
+                  isDelayed={f.is_delayed}
+                  delayMinutes={f.delay_minutes}
+                  isCancelled={false}
+                  gate={null}
+                  terminal={null}
+                  isAirborne={false}
+                  isPast={true}
+                />
+              </div>
             ))}
           </div>
         </div>
@@ -217,6 +248,12 @@ export function RouteMonitor({ initial }: Props) {
           Flights appear once taxiing or airborne — future schedules not available.
         </p>
       </footer>
+
+      {/* Flight detail drawer */}
+      <FlightDrawer
+        flight={selectedFlight}
+        onClose={() => setSelectedFlight(null)}
+      />
     </main>
   );
 }

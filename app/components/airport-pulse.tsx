@@ -1,23 +1,25 @@
 "use client";
 
 import { useState } from "react";
+import type { DrawerFlight } from "./flight-drawer";
 
 type DxbFlight = {
   flight_number: string;
+  callsign: string | null;
   airline: string | null;
+  origin_iata: string | null;
   destination_iata: string | null;
   status: string;
+  estimated_time: string | null;
   actual_time: string | null;
   fetched_at: string;
-  raw_payload: {
-    alt?: number;
-    gspeed?: number;
-  } | null;
+  raw_payload: Record<string, unknown> | null;
 };
 
 type Props = {
   stats: { total: number; airborne: number; onGround: number };
   departures: DxbFlight[];
+  onSelectFlight: (flight: DrawerFlight) => void;
 };
 
 function formatTimeGST(iso: string): string {
@@ -62,7 +64,7 @@ function statusLabel(status: string): string {
   }
 }
 
-export function AirportPulse({ stats, departures }: Props) {
+export function AirportPulse({ stats, departures, onSelectFlight }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   if (stats.total === 0) return null;
@@ -108,7 +110,8 @@ export function AirportPulse({ stats, departures }: Props) {
                 {departures.map((dep) => (
                   <tr
                     key={`${dep.flight_number}-${dep.fetched_at}`}
-                    className="hover:bg-gray-800/30"
+                    className="hover:bg-gray-800/30 cursor-pointer"
+                    onClick={() => onSelectFlight(dep as DrawerFlight)}
                   >
                     <td className="px-3 py-1.5 text-gray-300 font-mono">
                       {dep.flight_number}

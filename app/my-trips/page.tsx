@@ -1,7 +1,18 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Sparkline } from "@/app/components/pulse-atlas/sparkline";
+
+function Sparkline({ data, width, height, color }: { data: number[]; width: number; height: number; color: string }) {
+  if (!data.length) return null;
+  const max = Math.max(...data, 1);
+  const points = data.map((v, i) => `${(i / (data.length - 1)) * width},${height - (v / max) * height}`).join(" ");
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
+      <polyline points={points} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points={`0,${height} ${points} ${width},${height}`} fill={color} fillOpacity={0.1} stroke="none" />
+    </svg>
+  );
+}
 
 type TripIntel = {
   route: string;

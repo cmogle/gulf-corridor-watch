@@ -51,6 +51,12 @@ function delayText(delayMinutes: number | null, isDelayed: boolean): string {
   return "Delayed";
 }
 
+function sourceBadgeClass(source: "EMIRATES" | "OPENSKY" | "LAST_KNOWN"): string {
+  if (source === "EMIRATES") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-200";
+  if (source === "OPENSKY") return "border-sky-500/40 bg-sky-500/10 text-sky-200";
+  return "border-amber-500/40 bg-amber-500/10 text-amber-200";
+}
+
 type Props = {
   initial: FocusedMonitorPayload;
 };
@@ -196,6 +202,7 @@ export function MainRouteMonitor({ initial }: Props) {
                 <tr>
                   <th className="px-4 py-3">Flight</th>
                   <th className="px-4 py-3">Route</th>
+                  <th className="px-4 py-3">Source</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Delay</th>
                   <th className="px-4 py-3">Scheduled</th>
@@ -218,13 +225,32 @@ export function MainRouteMonitor({ initial }: Props) {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-gray-300">{flight.routeLabel}</td>
-                    <td className="px-4 py-3 text-gray-200">{flight.statusLabel}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${sourceBadgeClass(
+                          flight.sourceProvenance,
+                        )}`}
+                      >
+                        {flight.sourceProvenance}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-200">
+                      <div>{flight.statusLabel}</div>
+                      {flight.emptyReason && (
+                        <div className="mt-0.5 text-xs text-amber-300">{flight.emptyReason}</div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-gray-300">
                       {delayText(flight.delayMinutes, flight.isDelayed)}
                     </td>
                     <td className="px-4 py-3 text-gray-300">{formatTimeGst(flight.scheduledTime)}</td>
                     <td className="px-4 py-3 text-gray-400">
-                      {formatTimeGst(flight.fetchedAt)} ({freshnessLabel(flight.freshnessMinutes)})
+                      {flight.fetchedAt
+                        ? `${formatTimeGst(flight.fetchedAt)} (${freshnessLabel(flight.freshnessMinutes)})`
+                        : "No observation timestamp"}
+                      {flight.staleReason && (
+                        <div className="mt-0.5 text-xs text-amber-300">{flight.staleReason}</div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -255,6 +281,25 @@ export function MainRouteMonitor({ initial }: Props) {
               <p className="mt-1">
                 Status: <span className="font-medium text-white">{detail.statusLabel}</span>
               </p>
+              <p className="mt-1">
+                Source:{" "}
+                <span
+                  className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${sourceBadgeClass(
+                    detail.sourceProvenance,
+                  )}`}
+                >
+                  {detail.sourceProvenance}
+                </span>
+              </p>
+              {detail.emptyReason && (
+                <p className="mt-1 text-amber-300">Data gap: {detail.emptyReason}</p>
+              )}
+              {detail.staleReason && (
+                <p className="mt-1 text-amber-300">Staleness: {detail.staleReason}</p>
+              )}
+              {detail.movementNote && (
+                <p className="mt-1 text-gray-400">{detail.movementNote}</p>
+              )}
               <p className="mt-1">
                 Delay: <span className="font-medium text-white">{delayText(detail.delayMinutes, detail.isDelayed)}</span>
               </p>

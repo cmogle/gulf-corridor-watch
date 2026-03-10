@@ -12,6 +12,7 @@ function obs(overrides: Partial<FlightObservationRow>): FlightObservationRow {
     id: "obs-default",
     flight_number: "EK1",
     callsign: null,
+    icao24: null,
     flight_id: null,
     airline: "Emirates",
     origin_iata: "DXB",

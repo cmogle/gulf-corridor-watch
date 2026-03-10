@@ -6,6 +6,7 @@ export const LOOKBACK_HOURS = 24;
 
 export const FOCUSED_ROUTE_GROUPS = ["DXB-BOM", "DXB-LHR", "DXB-LGW"] as const;
 export type FocusedRouteGroup = (typeof FOCUSED_ROUTE_GROUPS)[number];
+export type FlightDataSource = "EMIRATES" | "OPENSKY" | "LAST_KNOWN";
 
 type FocusedDirection =
   | "DXB-BOM"
@@ -28,6 +29,7 @@ export type FlightObservationRow = {
   id: string;
   flight_number: string;
   callsign: string | null;
+  icao24: string | null;
   flight_id: string | null;
   airline: string | null;
   origin_iata: string | null;
@@ -38,8 +40,12 @@ export type FlightObservationRow = {
   scheduled_time: string | null;
   estimated_time: string | null;
   actual_time: string | null;
-  fetched_at: string;
+  fetched_at: string | null;
   raw_payload: Record<string, unknown> | null;
+  source_provenance?: FlightDataSource;
+  stale_reason?: string | null;
+  empty_reason?: string | null;
+  movement_note?: string | null;
 };
 
 export type RouteSummaryCard = {
@@ -69,8 +75,12 @@ export type RouteFlightListItem = {
   scheduledTime: string | null;
   estimatedTime: string | null;
   actualTime: string | null;
-  fetchedAt: string;
+  fetchedAt: string | null;
   freshnessMinutes: number | null;
+  sourceProvenance: FlightDataSource;
+  staleReason: string | null;
+  emptyReason: string | null;
+  movementNote: string | null;
 };
 
 export type FlightTimelineItem = {
@@ -79,7 +89,7 @@ export type FlightTimelineItem = {
   statusLabel: string;
   isDelayed: boolean;
   delayMinutes: number | null;
-  fetchedAt: string;
+  fetchedAt: string | null;
   scheduledTime: string | null;
   estimatedTime: string | null;
   actualTime: string | null;
@@ -192,6 +202,8 @@ export function buildRouteSummaries(
   const latestSeenByRoute = new Map<FocusedRouteGroup, number>();
 
   for (const observation of latest) {
+    if (observation.empty_reason) continue;
+
     const route = routeGroupFor(observation.origin_iata, observation.destination_iata);
     if (!route) continue;
 
@@ -267,7 +279,11 @@ export function buildRecentFlights(
         estimatedTime: observation.estimated_time,
         actualTime: observation.actual_time,
         fetchedAt: observation.fetched_at,
-        freshnessMinutes: toFreshnessMinutes(nowMs, observation.fetched_at),
+        freshnessMinutes: observation.fetched_at ? toFreshnessMinutes(nowMs, observation.fetched_at) : null,
+        sourceProvenance: observation.source_provenance ?? "LAST_KNOWN",
+        staleReason: observation.stale_reason ?? null,
+        emptyReason: observation.empty_reason ?? null,
+        movementNote: observation.movement_note ?? null,
       };
     })
     .filter((row): row is RouteFlightListItem => row !== null);

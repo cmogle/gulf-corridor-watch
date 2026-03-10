@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { ingestAirports } from "@/lib/flightradar";
 import { isCronAuthorized } from "@/lib/cron-auth";
+import { routeGroupFor } from "@/lib/focused-routes";
 
 export const maxDuration = 30;
 
@@ -37,15 +38,15 @@ export async function GET(req: Request) {
       insertedCount = count ?? dxbObs.length;
     }
 
-    const fzBegCount = dxbObs.filter(
-      (o) => o.flight_number.startsWith("FZ") && o.destination_iata === "BEG"
+    const focusedCount = dxbObs.filter(
+      (o) => routeGroupFor(o.origin_iata, o.destination_iata) !== null,
     ).length;
 
     return Response.json({
       ok: true,
       total_positions: allObs.length,
       dxb_stored: insertedCount,
-      fz_beg: fzBegCount,
+      focused_routes_seen: focusedCount,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

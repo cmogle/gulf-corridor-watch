@@ -2,9 +2,9 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "FlyDubai DXB → BEG — Route Monitor",
+  title: "Gulf Corridor Watch — Live Route Monitor",
   description:
-    "Live flight status for FlyDubai routes from Dubai to Belgrade. Delays, cancellations, and live tracking.",
+    "Live route monitoring for DXB <-> BOM, DXB <-> LHR, and DXB <-> LGW using real flight observations only.",
 };
 
 export const viewport: Viewport = {
